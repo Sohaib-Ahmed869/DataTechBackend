@@ -2,6 +2,7 @@ const transporter = require("../config/emailConfig");
 const createEmailTemplate = require("../utils/emailTemplate");
 const GeneralInformationForm = require("../models/GeneralInformation.model");
 const Leads = require("../models/Leads.model");
+const NotificationService = require("../utils/notificationService");
 const submitGeneralInformationForm = async (req, res) => {
   try {
     const formData = req.body;
@@ -69,7 +70,13 @@ const submitGeneralInformationForm = async (req, res) => {
     const savedLead = await newLead.save();
 
     console.log("Lead created successfully:", savedLead._id);
-
+    try {
+      await NotificationService.createNewLeadNotification(savedLead);
+      console.log("Admin notification created for new lead:", savedLead._id);
+    } catch (notificationError) {
+      console.error("Error creating admin notification:", notificationError);
+      // Don't fail the main operation if notification fails
+    }
     res.status(201).json({
       message:
         "General information form submitted and lead created successfully",

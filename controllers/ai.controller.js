@@ -3,6 +3,7 @@ const createEmailTemplate = require("../utils/emailTemplate");
 
 const { AiServicesForm } = require("../models/AiServices.model"); // Adjust path as needed
 const Leads = require("../models/Leads.model");
+const NotificationService = require("../utils/notificationService");
 const submitAIServicesForm = async (req, res) => {
   try {
     const formData = req.body;
@@ -63,7 +64,12 @@ const submitAIServicesForm = async (req, res) => {
     const savedLead = await newLead.save();
 
     console.log("Lead created successfully:", savedLead._id);
-
+    try {
+      await NotificationService.createNewLeadNotification(savedLead);
+      console.log("Admin notification created for new lead:", savedLead._id);
+    } catch (notificationError) {
+      console.error("Error creating admin notification:", notificationError);
+    }
     res.status(201).json({
       message: "Form submitted and lead created successfully",
       submissionId: savedSubmission._id,

@@ -20,6 +20,8 @@ const GeneralInformationFormRoutes = require("./routes/GeneralInformationForm.ro
 const AuthRoutes = require("./routes/auth.routes");
 const LeadsRoutes = require("./routes/leads.routes");
 const UserRoutes = require("./routes/users.routes");
+const AdminDashboardRoutes = require("./routes/DashboardStats.routes");
+const NotificationRoutes = require("./routes/notification.routes");
 const app = express();
 const port = process.env.PORT || 5001;
 
@@ -35,7 +37,7 @@ initializeDatabase();
 
 // CORS Configuration
 const corsOptions = {
-  origin: ["http://localhost:5173"],
+  origin: ["http://localhost:5173", "http://localhost:5174"],
   credentials: true,
   optionsSuccessStatus: 200,
   methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
@@ -57,6 +59,8 @@ app.use("/api/general", GeneralInformationFormRoutes);
 app.use("/datatech/api/auth", AuthRoutes);
 app.use("/datatech/api/leads", LeadsRoutes);
 app.use("/datatech/api/users", UserRoutes);
+app.use("/datatech/api/admin/dashboard", AdminDashboardRoutes);
+app.use("/datatech/api/notifications", NotificationRoutes);
 // Error handling middleware
 app.use(errorHandler);
 

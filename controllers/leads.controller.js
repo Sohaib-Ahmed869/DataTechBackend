@@ -1,6 +1,7 @@
 const Leads = require("../models/Leads.model");
 const User = require("../models/user.model");
 const mongoose = require("mongoose"); // Make sure to import mongoose
+const NotificationService = require("../utils/notificationService");
 
 // Get all leads with filtering, sorting, and pagination
 
@@ -897,7 +898,6 @@ const updateLeadStatus = async (req, res) => {
   }
 };
 
-// Assign agent to lead
 const assignAgent = async (req, res) => {
   try {
     const { leadId } = req.params;
@@ -911,7 +911,21 @@ const assignAgent = async (req, res) => {
       });
     }
 
+    // Get the current lead to check for previous assignment
+    const currentLead = await Leads.findById(leadId).populate(
+      "assigned_agent_id"
+    );
+
+    if (!currentLead) {
+      return res.status(404).json({
+        success: false,
+        error: "Lead not found",
+      });
+    }
+
+    const previousAgent = currentLead.assigned_agent_id;
     let updateData;
+    let newAgent = null;
 
     if (assigned_agent === "unassigned") {
       // Handle unassigned case
@@ -919,6 +933,23 @@ const assignAgent = async (req, res) => {
         assigned_agent_id: null,
         assigned_agent_name: "unassigned",
       };
+
+      // Create unassignment notification if there was a previous agent
+      if (previousAgent && req.user) {
+        try {
+          await NotificationService.createLeadUnassignedNotification(
+            currentLead,
+            req.user._id,
+            previousAgent
+          );
+        } catch (notificationError) {
+          console.error(
+            "Error creating unassignment notification:",
+            notificationError
+          );
+          // Don't fail the main operation if notification fails
+        }
+      }
     } else {
       // Find the user to get their name
       const agent = await User.findById(assigned_agent);
@@ -930,6 +961,7 @@ const assignAgent = async (req, res) => {
         });
       }
 
+      newAgent = agent;
       updateData = {
         assigned_agent_id: assigned_agent,
         assigned_agent_name: `${agent.firstName} ${agent.lastName}`,
@@ -946,6 +978,37 @@ const assignAgent = async (req, res) => {
         success: false,
         error: "Lead not found",
       });
+    }
+
+    // Create notifications for assignment/reassignment
+    if (newAgent && req.user) {
+      try {
+        if (
+          previousAgent &&
+          previousAgent._id.toString() !== newAgent._id.toString()
+        ) {
+          // Lead was reassigned
+          await NotificationService.createLeadReassignedNotification(
+            updatedLead,
+            req.user._id,
+            previousAgent,
+            newAgent
+          );
+        } else if (!previousAgent) {
+          // Lead was newly assigned
+          await NotificationService.createLeadAssignedNotification(
+            updatedLead,
+            req.user._id,
+            newAgent
+          );
+        }
+      } catch (notificationError) {
+        console.error(
+          "Error creating assignment notification:",
+          notificationError
+        );
+        // Don't fail the main operation if notification fails
+      }
     }
 
     res.status(200).json({
@@ -999,8 +1062,6 @@ const addRemarks = async (req, res) => {
     });
   }
 };
-
-// Get single lead by ID
 
 module.exports = {
   updateLeadStatus,

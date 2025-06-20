@@ -2,6 +2,7 @@ const BusinessGrowthForm = require("../models/BusinessGrowth.model"); // Adjust 
 const transporter = require("../config/emailConfig");
 const createEmailTemplate = require("../utils/emailTemplate");
 const Leads = require("../models/Leads.model");
+const NotificationService = require("../utils/notificationService");
 
 // Separate email function
 const sendBusinessFormEmails = async (formData) => {
@@ -191,7 +192,13 @@ const submitBusinessForm = async (req, res) => {
     const savedLead = await newLead.save();
 
     console.log("Lead created successfully:", savedLead._id);
-
+    try {
+      await NotificationService.createNewLeadNotification(savedLead);
+      console.log("Admin notification created for new lead:", savedLead._id);
+    } catch (notificationError) {
+      console.error("Error creating admin notification:", notificationError);
+      // Don't fail the main operation if notification fails
+    }
     res.status(201).json({
       message: "Business form submitted and lead created successfully",
       submissionId: savedSubmission._id,
