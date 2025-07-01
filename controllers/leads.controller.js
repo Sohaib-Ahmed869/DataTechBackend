@@ -2,7 +2,7 @@ const Leads = require("../models/Leads.model");
 const User = require("../models/user.model");
 const mongoose = require("mongoose"); // Make sure to import mongoose
 const NotificationService = require("../utils/notificationService");
-
+const Customer = require("../models/Customer.model");
 // Get all leads with filtering, sorting, and pagination
 
 const getLeads = async (req, res) => {
@@ -20,7 +20,7 @@ const getLeads = async (req, res) => {
       start_date,
       end_date,
     } = req.query;
-
+    console.log("endpoint called");
     // Build filter object
     const filter = {};
 
@@ -93,14 +93,16 @@ const getLeads = async (req, res) => {
         $group: {
           _id: null,
           totalLeads: { $sum: 1 },
-          newLeads: {
-            $sum: { $cond: [{ $eq: ["$lead_status", "New"] }, 1, 0] },
+          pendingLeads: {
+            $sum: { $cond: [{ $eq: ["$lead_status", "pending"] }, 1, 0] },
           },
-          inProgressLeads: {
-            $sum: { $cond: [{ $eq: ["$lead_status", "In Progress"] }, 1, 0] },
+          awaitingApprovalLeads: {
+            $sum: {
+              $cond: [{ $eq: ["$lead_status", "awaiting_approval"] }, 1, 0],
+            },
           },
-          closedLeads: {
-            $sum: { $cond: [{ $eq: ["$lead_status", "Closed"] }, 1, 0] },
+          ApprovedLeads: {
+            $sum: { $cond: [{ $eq: ["$lead_status", "approved"] }, 1, 0] },
           },
           successfulLeads: {
             $sum: { $cond: [{ $eq: ["$lead_remarks", "Successful"] }, 1, 0] },
@@ -129,9 +131,9 @@ const getLeads = async (req, res) => {
             ? stats[0]
             : {
                 totalLeads: 0,
-                newLeads: 0,
-                inProgressLeads: 0,
-                closedLeads: 0,
+                pendingLeads: 0,
+                awaitingApprovalLeads: 0,
+                ApprovedLeads: 0,
                 successfulLeads: 0,
                 unsuccessfulLeads: 0,
               },
@@ -273,14 +275,16 @@ const getLeadsByAgentId = async (req, res) => {
         $group: {
           _id: null,
           totalLeads: { $sum: 1 },
-          newLeads: {
-            $sum: { $cond: [{ $eq: ["$lead_status", "New"] }, 1, 0] },
+          pendingLeads: {
+            $sum: { $cond: [{ $eq: ["$lead_status", "pending"] }, 1, 0] },
           },
-          inProgressLeads: {
-            $sum: { $cond: [{ $eq: ["$lead_status", "In Progress"] }, 1, 0] },
+          awaitingApprovalLeads: {
+            $sum: {
+              $cond: [{ $eq: ["$lead_status", "awaiting_approval"] }, 1, 0],
+            },
           },
-          closedLeads: {
-            $sum: { $cond: [{ $eq: ["$lead_status", "Closed"] }, 1, 0] },
+          ApprovedLeads: {
+            $sum: { $cond: [{ $eq: ["$lead_status", "approved"] }, 1, 0] },
           },
           successfulLeads: {
             $sum: { $cond: [{ $eq: ["$lead_remarks", "Successful"] }, 1, 0] },
@@ -309,9 +313,9 @@ const getLeadsByAgentId = async (req, res) => {
             ? stats[0]
             : {
                 totalLeads: 0,
-                newLeads: 0,
-                inProgressLeads: 0,
-                closedLeads: 0,
+                pendingLeads: 0,
+                awaitingApprovalLeads: 0,
+                ApprovedLeads: 0,
                 successfulLeads: 0,
                 unsuccessfulLeads: 0,
               },
@@ -1062,7 +1066,104 @@ const addRemarks = async (req, res) => {
     });
   }
 };
+// Add this to leads.controller.js
+const convertLeadToCustomer = async (req, res) => {
+  try {
+    const { leadId } = req.params;
 
+    // Find the lead
+    const lead = await Leads.findById(leadId);
+    if (!lead) {
+      return res.status(404).json({
+        success: false,
+        message: "Lead not found",
+      });
+    }
+
+    // Check if customer already created for this lead
+    if (lead.customer_created) {
+      return res.status(400).json({
+        success: false,
+        message: "Customer already created for this lead",
+      });
+    }
+
+    // Generate unique CardCode
+    const generateCardCode = async () => {
+      let cardCode;
+      let isUnique = false;
+      let counter = 1;
+
+      const baseName = lead.name
+        ? lead.name.replace(/\s+/g, "").substring(0, 6).toUpperCase()
+        : "CUST";
+
+      while (!isUnique) {
+        cardCode = `${baseName}${counter.toString().padStart(3, "0")}`;
+        const existingCustomer = await Customer.findOne({ CardCode: cardCode });
+        if (!existingCustomer) {
+          isUnique = true;
+        } else {
+          counter++;
+        }
+      }
+      return cardCode;
+    };
+
+    const cardCode = await generateCardCode();
+
+    // Create customer from lead data
+    const customerData = {
+      CardName: lead.name || "Unknown Customer",
+      CardCode: cardCode,
+      Email: lead.email,
+      phoneNumber: lead.contact,
+      assignedTo: lead.assigned_agent_id,
+      notes: `Created from lead: ${lead.lead_type}\nService interested: ${
+        lead.service_interested_in || "N/A"
+      }\nDescription: ${lead.description || "N/A"}`,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    // Split name into first and last name if possible
+    if (lead.name) {
+      const nameParts = lead.name.trim().split(" ");
+      if (nameParts.length > 1) {
+        customerData.firstName = nameParts[0];
+        customerData.lastName = nameParts.slice(1).join(" ");
+      } else {
+        customerData.firstName = nameParts[0];
+      }
+    }
+
+    // Create the customer
+    const newCustomer = new Customer(customerData);
+    await newCustomer.save();
+
+    // Update lead to mark customer as created
+    await Leads.findByIdAndUpdate(leadId, {
+      customer_created: true,
+      customer_id: newCustomer._id,
+    });
+
+    res.status(201).json({
+      success: true,
+      message: "Customer created successfully from lead",
+      data: {
+        customer: newCustomer,
+        leadId: leadId,
+      },
+    });
+  } catch (error) {
+    console.error("Error converting lead to customer:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to create customer from lead",
+      error: error.message,
+    });
+  }
+};
 module.exports = {
   updateLeadStatus,
   assignAgent,
@@ -1072,4 +1173,5 @@ module.exports = {
   getLeadsByAgentForLeadsBoard,
   getLeadsforLeadsBoard,
   getLeadsByAgentId,
+  convertLeadToCustomer,
 };

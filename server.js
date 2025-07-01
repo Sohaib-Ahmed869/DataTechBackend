@@ -22,6 +22,10 @@ const LeadsRoutes = require("./routes/leads.routes");
 const UserRoutes = require("./routes/users.routes");
 const AdminDashboardRoutes = require("./routes/DashboardStats.routes");
 const NotificationRoutes = require("./routes/notification.routes");
+const CustomerRoutes = require("./routes/customer.routes");
+const QuotationRoutes = require("./routes/quotation.routes");
+const TaskRoutes = require("./routes/task.routes");
+const SalesOrderRoutes = require("./routes/salesOrder.routes");
 const app = express();
 const port = process.env.PORT || 5001;
 
@@ -61,6 +65,10 @@ app.use("/datatech/api/leads", LeadsRoutes);
 app.use("/datatech/api/users", UserRoutes);
 app.use("/datatech/api/admin/dashboard", AdminDashboardRoutes);
 app.use("/datatech/api/notifications", NotificationRoutes);
+app.use("/datatech/api/customers", CustomerRoutes);
+app.use("/datatech/api/quotations", QuotationRoutes);
+app.use("/datatech/api/tasks", TaskRoutes);
+app.use("/datatech/api/sales-orders", SalesOrderRoutes);
 // Error handling middleware
 app.use(errorHandler);
 

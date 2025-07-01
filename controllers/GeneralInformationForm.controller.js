@@ -3,6 +3,7 @@ const createEmailTemplate = require("../utils/emailTemplate");
 const GeneralInformationForm = require("../models/GeneralInformation.model");
 const Leads = require("../models/Leads.model");
 const NotificationService = require("../utils/notificationService");
+const { createLeadTask } = require("./task.controller");
 const submitGeneralInformationForm = async (req, res) => {
   try {
     const formData = req.body;
@@ -68,6 +69,7 @@ const submitGeneralInformationForm = async (req, res) => {
 
     const newLead = new Leads(leadData);
     const savedLead = await newLead.save();
+    await createLeadTask(savedLead);
 
     console.log("Lead created successfully:", savedLead._id);
     try {

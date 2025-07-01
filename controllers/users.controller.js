@@ -1,6 +1,7 @@
 const User = require("../models/user.model");
 const bcrypt = require("bcrypt");
 const Leads = require("../models/Leads.model");
+const Quotation = require("../models/Quotation.model"); // Add quotation model
 const getUserById = async (req, res) => {
   try {
     const { id } = req.params;
@@ -26,142 +27,6 @@ const getUserById = async (req, res) => {
     });
   }
 };
-
-// Get all data tech sales agents
-// const getDataTechSalesAgents = async (req, res) => {
-//   try {
-//     const {
-//       page = 1,
-//       limit = 10,
-//       search,
-//       deactivated,
-//       sort_by = "createdAt",
-//       sort_order = "desc",
-//       include_deactivated = false,
-//     } = req.query;
-
-//     // Build filter object
-//     const filter = { role: "data_tech_sales_agent" };
-
-//     // Filter by deactivated status
-//     if (deactivated !== undefined) {
-//       filter.deactivated = deactivated === "true";
-//     } else if (!include_deactivated) {
-//       // By default, exclude deactivated users unless explicitly requested
-//       filter.deactivated = false;
-//     }
-
-//     // Search functionality (name, email, phone)
-//     if (search) {
-//       filter.$or = [
-//         { firstName: { $regex: search, $options: "i" } },
-//         { lastName: { $regex: search, $options: "i" } },
-//         { email: { $regex: search, $options: "i" } },
-//         { phone: { $regex: search, $options: "i" } },
-//       ];
-//     }
-
-//     // Pagination calculations
-//     const pageNum = parseInt(page);
-//     const limitNum = parseInt(limit);
-//     const skip = (pageNum - 1) * limitNum;
-
-//     // Sort configuration
-//     const sortConfig = {};
-//     sortConfig[sort_by] = sort_order === "desc" ? -1 : 1;
-
-//     // Execute query with pagination, sorting, and population
-//     const agents = await User.find(filter)
-//       .populate("createdBy", "firstName lastName email")
-//       .populate("manager", "firstName lastName email")
-//       .sort(sortConfig)
-//       .skip(skip)
-//       .limit(limitNum)
-//       .select("-password") // Exclude password from response
-//       .lean();
-
-//     // Get total count for pagination
-//     const totalAgents = await User.countDocuments(filter);
-//     const totalPages = Math.ceil(totalAgents / limitNum);
-
-//     // Calculate statistics
-//     const stats = await User.aggregate([
-//       { $match: filter },
-//       {
-//         $group: {
-//           _id: null,
-//           totalAgents: { $sum: 1 },
-//           activeAgents: {
-//             $sum: { $cond: [{ $eq: ["$deactivated", false] }, 1, 0] },
-//           },
-//           deactivatedAgents: {
-//             $sum: { $cond: [{ $eq: ["$deactivated", true] }, 1, 0] },
-//           },
-//           totalTarget: { $sum: "$target" },
-//           totalTargetAchieved: { $sum: "$targetAchieved" },
-//           totalCallsMade: { $sum: "$callsMade" },
-//           averageTarget: { $avg: "$target" },
-//           averageAchieved: { $avg: "$targetAchieved" },
-//         },
-//       },
-//     ]);
-
-//     // Format agents data with computed fields
-//     const formattedAgents = agents.map((agent) => ({
-//       ...agent,
-//       fullName: `${agent.firstName} ${agent.lastName}`,
-//       achievementRate:
-//         agent.target > 0
-//           ? ((agent.targetAchieved / agent.target) * 100).toFixed(2)
-//           : 0,
-//     }));
-
-//     res.status(200).json({
-//       success: true,
-//       data: {
-//         agents: formattedAgents,
-//         pagination: {
-//           currentPage: pageNum,
-//           totalPages,
-//           totalAgents,
-//           hasNextPage: pageNum < totalPages,
-//           hasPrevPage: pageNum > 1,
-//           limit: limitNum,
-//         },
-//         statistics:
-//           stats.length > 0
-//             ? {
-//                 ...stats[0],
-//                 overallAchievementRate:
-//                   stats[0].totalTarget > 0
-//                     ? (
-//                         (stats[0].totalTargetAchieved / stats[0].totalTarget) *
-//                         100
-//                       ).toFixed(2)
-//                     : 0,
-//               }
-//             : {
-//                 totalAgents: 0,
-//                 activeAgents: 0,
-//                 deactivatedAgents: 0,
-//                 totalTarget: 0,
-//                 totalTargetAchieved: 0,
-//                 totalCallsMade: 0,
-//                 averageTarget: 0,
-//                 averageAchieved: 0,
-//                 overallAchievementRate: 0,
-//               },
-//       },
-//     });
-//   } catch (error) {
-//     console.error("Error fetching data tech sales agents:", error);
-//     res.status(500).json({
-//       success: false,
-//       error: "Failed to fetch data tech sales agents",
-//       details: error.message,
-//     });
-//   }
-// };
 const getDataTechSalesAgents = async (req, res) => {
   try {
     const {
@@ -218,7 +83,7 @@ const getDataTechSalesAgents = async (req, res) => {
     const totalAgents = await User.countDocuments(filter);
     const totalPages = Math.ceil(totalAgents / limitNum);
 
-    // Calculate leads statistics for all agents
+    // Calculate leads statistics for all agents (based on approval status)
     const leadsStats = await Leads.aggregate([
       {
         $match: {
@@ -229,32 +94,108 @@ const getDataTechSalesAgents = async (req, res) => {
         $group: {
           _id: "$assigned_agent_id",
           totalLeadsAssigned: { $sum: 1 },
-          successfulLeads: {
+          approvedLeads: {
             $sum: {
-              $cond: [{ $eq: ["$lead_remarks", "Successful"] }, 1, 0],
+              $cond: [{ $eq: ["$lead_status", "approved"] }, 1, 0],
+            },
+          },
+          pendingLeads: {
+            $sum: {
+              $cond: [{ $eq: ["$lead_status", "pending"] }, 1, 0],
+            },
+          },
+          awaitingApprovalLeads: {
+            $sum: {
+              $cond: [{ $eq: ["$lead_status", "awaiting_approval"] }, 1, 0],
+            },
+          },
+          rejectedLeads: {
+            $sum: {
+              $cond: [{ $eq: ["$lead_status", "rejected"] }, 1, 0],
             },
           },
         },
       },
     ]);
 
-    // Create a map for quick lookup of leads stats by agent ID
+    // Calculate quotations statistics for all agents (based on approval status)
+    const quotationsStats = await Quotation.aggregate([
+      {
+        $match: {
+          salesAgent: { $in: agents.map((agent) => agent._id) },
+        },
+      },
+      {
+        $group: {
+          _id: "$salesAgent",
+          totalQuotationsAssigned: { $sum: 1 },
+          approvedQuotations: {
+            $sum: {
+              $cond: [{ $eq: ["$approvalStatus", "approved"] }, 1, 0],
+            },
+          },
+          pendingQuotations: {
+            $sum: {
+              $cond: [{ $eq: ["$approvalStatus", "pending"] }, 1, 0],
+            },
+          },
+          awaitingApprovalQuotations: {
+            $sum: {
+              $cond: [{ $eq: ["$approvalStatus", "awaiting_approval"] }, 1, 0],
+            },
+          },
+          rejectedQuotations: {
+            $sum: {
+              $cond: [{ $eq: ["$approvalStatus", "rejected"] }, 1, 0],
+            },
+          },
+          totalQuotationValue: { $sum: "$DocTotal" },
+          approvedQuotationValue: {
+            $sum: {
+              $cond: [{ $eq: ["$approvalStatus", "approved"] }, "$DocTotal", 0],
+            },
+          },
+        },
+      },
+    ]);
+
+    // Create maps for quick lookup
     const leadsStatsMap = leadsStats.reduce((map, stat) => {
+      const totalItems = stat.totalLeadsAssigned;
+      const approvedItems = stat.approvedLeads;
+
       map[stat._id.toString()] = {
-        totalLeadsAssigned: stat.totalLeadsAssigned,
-        successfulLeads: stat.successfulLeads,
-        achievementRate:
-          stat.totalLeadsAssigned > 0
-            ? ((stat.successfulLeads / stat.totalLeadsAssigned) * 100).toFixed(
-                2
-              )
-            : 0,
+        totalLeadsAssigned: totalItems,
+        approvedLeads: approvedItems,
+        pendingLeads: stat.pendingLeads,
+        awaitingApprovalLeads: stat.awaitingApprovalLeads,
+        rejectedLeads: stat.rejectedLeads,
+        leadsAchievementRate:
+          totalItems > 0 ? ((approvedItems / totalItems) * 100).toFixed(2) : 0,
       };
       return map;
     }, {});
 
-    // Calculate overall statistics
-    const overallStats = await Leads.aggregate([
+    const quotationsStatsMap = quotationsStats.reduce((map, stat) => {
+      const totalItems = stat.totalQuotationsAssigned;
+      const approvedItems = stat.approvedQuotations;
+
+      map[stat._id.toString()] = {
+        totalQuotationsAssigned: totalItems,
+        approvedQuotations: approvedItems,
+        pendingQuotations: stat.pendingQuotations,
+        awaitingApprovalQuotations: stat.awaitingApprovalQuotations,
+        rejectedQuotations: stat.rejectedQuotations,
+        quotationsAchievementRate:
+          totalItems > 0 ? ((approvedItems / totalItems) * 100).toFixed(2) : 0,
+        totalQuotationValue: stat.totalQuotationValue || 0,
+        approvedQuotationValue: stat.approvedQuotationValue || 0,
+      };
+      return map;
+    }, {});
+
+    // Calculate overall statistics for leads
+    const overallLeadsStats = await Leads.aggregate([
       {
         $lookup: {
           from: "users",
@@ -277,29 +218,115 @@ const getDataTechSalesAgents = async (req, res) => {
         $group: {
           _id: null,
           totalLeadsAssigned: { $sum: 1 },
-          totalSuccessfulLeads: {
+          totalApprovedLeads: {
             $sum: {
-              $cond: [{ $eq: ["$lead_remarks", "Successful"] }, 1, 0],
+              $cond: [{ $eq: ["$lead_status", "approved"] }, 1, 0],
             },
           },
         },
       },
     ]);
 
-    // Format agents data with computed fields and leads data
+    // Calculate overall statistics for quotations
+    const overallQuotationsStats = await Quotation.aggregate([
+      {
+        $lookup: {
+          from: "users",
+          localField: "salesAgent",
+          foreignField: "_id",
+          as: "agent",
+        },
+      },
+      {
+        $match: {
+          "agent.role": "data_tech_sales_agent",
+          ...(filter.deactivated !== undefined
+            ? { "agent.deactivated": filter.deactivated }
+            : !include_deactivated
+            ? { "agent.deactivated": false }
+            : {}),
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          totalQuotationsAssigned: { $sum: 1 },
+          totalApprovedQuotations: {
+            $sum: {
+              $cond: [{ $eq: ["$approvalStatus", "approved"] }, 1, 0],
+            },
+          },
+          totalQuotationValue: { $sum: "$DocTotal" },
+          totalApprovedQuotationValue: {
+            $sum: {
+              $cond: [{ $eq: ["$approvalStatus", "approved"] }, "$DocTotal", 0],
+            },
+          },
+        },
+      },
+    ]);
+
+    // Format agents data with computed fields and statistics
     const formattedAgents = agents.map((agent) => {
       const agentLeadsStats = leadsStatsMap[agent._id.toString()] || {
         totalLeadsAssigned: 0,
-        successfulLeads: 0,
-        achievementRate: 0,
+        approvedLeads: 0,
+        pendingLeads: 0,
+        awaitingApprovalLeads: 0,
+        rejectedLeads: 0,
+        leadsAchievementRate: 0,
       };
+
+      const agentQuotationsStats = quotationsStatsMap[agent._id.toString()] || {
+        totalQuotationsAssigned: 0,
+        approvedQuotations: 0,
+        pendingQuotations: 0,
+        awaitingApprovalQuotations: 0,
+        rejectedQuotations: 0,
+        quotationsAchievementRate: 0,
+        totalQuotationValue: 0,
+        approvedQuotationValue: 0,
+      };
+
+      // Calculate overall achievement rate (combining leads and quotations)
+      const totalAssigned =
+        agentLeadsStats.totalLeadsAssigned +
+        agentQuotationsStats.totalQuotationsAssigned;
+      const totalApproved =
+        agentLeadsStats.approvedLeads + agentQuotationsStats.approvedQuotations;
+      const overallAchievementRate =
+        totalAssigned > 0
+          ? ((totalApproved / totalAssigned) * 100).toFixed(2)
+          : 0;
 
       return {
         ...agent,
         fullName: `${agent.firstName} ${agent.lastName}`,
+
+        // Leads statistics
         leadsAssigned: agentLeadsStats.totalLeadsAssigned,
-        successfulLeads: agentLeadsStats.successfulLeads,
-        achievementRate: agentLeadsStats.achievementRate,
+        approvedLeads: agentLeadsStats.approvedLeads,
+        pendingLeads: agentLeadsStats.pendingLeads,
+        awaitingApprovalLeads: agentLeadsStats.awaitingApprovalLeads,
+        rejectedLeads: agentLeadsStats.rejectedLeads,
+        leadsAchievementRate: agentLeadsStats.leadsAchievementRate,
+
+        // Quotations statistics
+        quotationsAssigned: agentQuotationsStats.totalQuotationsAssigned,
+        approvedQuotations: agentQuotationsStats.approvedQuotations,
+        pendingQuotations: agentQuotationsStats.pendingQuotations,
+        awaitingApprovalQuotations:
+          agentQuotationsStats.awaitingApprovalQuotations,
+        rejectedQuotations: agentQuotationsStats.rejectedQuotations,
+        quotationsAchievementRate:
+          agentQuotationsStats.quotationsAchievementRate,
+        totalQuotationValue: agentQuotationsStats.totalQuotationValue,
+        approvedQuotationValue: agentQuotationsStats.approvedQuotationValue,
+
+        // Overall statistics
+        totalAssigned: totalAssigned,
+        totalApproved: totalApproved,
+        overallAchievementRate: overallAchievementRate,
       };
     });
 
@@ -321,22 +348,82 @@ const getDataTechSalesAgents = async (req, res) => {
     ]);
 
     const statistics = {
+      // Agent statistics
       totalAgents: agentStats.length > 0 ? agentStats[0].totalAgents : 0,
       activeAgents: agentStats.length > 0 ? agentStats[0].activeAgents : 0,
       deactivatedAgents:
         agentStats.length > 0 ? agentStats[0].deactivatedAgents : 0,
+
+      // Leads statistics
       totalLeadsAssigned:
-        overallStats.length > 0 ? overallStats[0].totalLeadsAssigned : 0,
-      totalSuccessfulLeads:
-        overallStats.length > 0 ? overallStats[0].totalSuccessfulLeads : 0,
-      overallAchievementRate:
-        overallStats.length > 0 && overallStats[0].totalLeadsAssigned > 0
+        overallLeadsStats.length > 0
+          ? overallLeadsStats[0].totalLeadsAssigned
+          : 0,
+      totalApprovedLeads:
+        overallLeadsStats.length > 0
+          ? overallLeadsStats[0].totalApprovedLeads
+          : 0,
+      overallLeadsAchievementRate:
+        overallLeadsStats.length > 0 &&
+        overallLeadsStats[0].totalLeadsAssigned > 0
           ? (
-              (overallStats[0].totalSuccessfulLeads /
-                overallStats[0].totalLeadsAssigned) *
+              (overallLeadsStats[0].totalApprovedLeads /
+                overallLeadsStats[0].totalLeadsAssigned) *
               100
             ).toFixed(2)
           : 0,
+
+      // Quotations statistics
+      totalQuotationsAssigned:
+        overallQuotationsStats.length > 0
+          ? overallQuotationsStats[0].totalQuotationsAssigned
+          : 0,
+      totalApprovedQuotations:
+        overallQuotationsStats.length > 0
+          ? overallQuotationsStats[0].totalApprovedQuotations
+          : 0,
+      totalQuotationValue:
+        overallQuotationsStats.length > 0
+          ? overallQuotationsStats[0].totalQuotationValue
+          : 0,
+      totalApprovedQuotationValue:
+        overallQuotationsStats.length > 0
+          ? overallQuotationsStats[0].totalApprovedQuotationValue
+          : 0,
+      overallQuotationsAchievementRate:
+        overallQuotationsStats.length > 0 &&
+        overallQuotationsStats[0].totalQuotationsAssigned > 0
+          ? (
+              (overallQuotationsStats[0].totalApprovedQuotations /
+                overallQuotationsStats[0].totalQuotationsAssigned) *
+              100
+            ).toFixed(2)
+          : 0,
+
+      // Combined statistics
+      overallAchievementRate: (() => {
+        const totalLeads =
+          overallLeadsStats.length > 0
+            ? overallLeadsStats[0].totalLeadsAssigned
+            : 0;
+        const totalQuotations =
+          overallQuotationsStats.length > 0
+            ? overallQuotationsStats[0].totalQuotationsAssigned
+            : 0;
+        const approvedLeads =
+          overallLeadsStats.length > 0
+            ? overallLeadsStats[0].totalApprovedLeads
+            : 0;
+        const approvedQuotations =
+          overallQuotationsStats.length > 0
+            ? overallQuotationsStats[0].totalApprovedQuotations
+            : 0;
+        const totalAssigned = totalLeads + totalQuotations;
+        const totalApproved = approvedLeads + approvedQuotations;
+        return totalAssigned > 0
+          ? ((totalApproved / totalAssigned) * 100).toFixed(2)
+          : 0;
+      })(),
     };
 
     res.status(200).json({
@@ -363,6 +450,207 @@ const getDataTechSalesAgents = async (req, res) => {
     });
   }
 };
+// const getDataTechSalesAgents = async (req, res) => {
+//   try {
+//     const {
+//       page = 1,
+//       limit = 10,
+//       search,
+//       deactivated,
+//       sort_by = "createdAt",
+//       sort_order = "desc",
+//       include_deactivated = false,
+//     } = req.query;
+
+//     // Build filter object
+//     const filter = { role: "data_tech_sales_agent" };
+
+//     // Filter by deactivated status
+//     if (deactivated !== undefined) {
+//       filter.deactivated = deactivated === "true";
+//     } else if (!include_deactivated) {
+//       // By default, exclude deactivated users unless explicitly requested
+//       filter.deactivated = false;
+//     }
+
+//     // Search functionality (name, email, phone)
+//     if (search) {
+//       filter.$or = [
+//         { firstName: { $regex: search, $options: "i" } },
+//         { lastName: { $regex: search, $options: "i" } },
+//         { email: { $regex: search, $options: "i" } },
+//         { phone: { $regex: search, $options: "i" } },
+//       ];
+//     }
+
+//     // Pagination calculations
+//     const pageNum = parseInt(page);
+//     const limitNum = parseInt(limit);
+//     const skip = (pageNum - 1) * limitNum;
+
+//     // Sort configuration
+//     const sortConfig = {};
+//     sortConfig[sort_by] = sort_order === "desc" ? -1 : 1;
+
+//     // Execute query with pagination, sorting, and population
+//     const agents = await User.find(filter)
+//       .populate("createdBy", "firstName lastName email")
+//       .populate("manager", "firstName lastName email")
+//       .sort(sortConfig)
+//       .skip(skip)
+//       .limit(limitNum)
+//       .select("-password") // Exclude password from response
+//       .lean();
+
+//     // Get total count for pagination
+//     const totalAgents = await User.countDocuments(filter);
+//     const totalPages = Math.ceil(totalAgents / limitNum);
+
+//     // Calculate leads statistics for all agents
+//     const leadsStats = await Leads.aggregate([
+//       {
+//         $match: {
+//           assigned_agent_id: { $in: agents.map((agent) => agent._id) },
+//         },
+//       },
+//       {
+//         $group: {
+//           _id: "$assigned_agent_id",
+//           totalLeadsAssigned: { $sum: 1 },
+//           successfulLeads: {
+//             $sum: {
+//               $cond: [{ $eq: ["$lead_remarks", "Successful"] }, 1, 0],
+//             },
+//           },
+//         },
+//       },
+//     ]);
+
+//     // Create a map for quick lookup of leads stats by agent ID
+//     const leadsStatsMap = leadsStats.reduce((map, stat) => {
+//       map[stat._id.toString()] = {
+//         totalLeadsAssigned: stat.totalLeadsAssigned,
+//         successfulLeads: stat.successfulLeads,
+//         achievementRate:
+//           stat.totalLeadsAssigned > 0
+//             ? ((stat.successfulLeads / stat.totalLeadsAssigned) * 100).toFixed(
+//                 2
+//               )
+//             : 0,
+//       };
+//       return map;
+//     }, {});
+
+//     // Calculate overall statistics
+//     const overallStats = await Leads.aggregate([
+//       {
+//         $lookup: {
+//           from: "users",
+//           localField: "assigned_agent_id",
+//           foreignField: "_id",
+//           as: "agent",
+//         },
+//       },
+//       {
+//         $match: {
+//           "agent.role": "data_tech_sales_agent",
+//           ...(filter.deactivated !== undefined
+//             ? { "agent.deactivated": filter.deactivated }
+//             : !include_deactivated
+//             ? { "agent.deactivated": false }
+//             : {}),
+//         },
+//       },
+//       {
+//         $group: {
+//           _id: null,
+//           totalLeadsAssigned: { $sum: 1 },
+//           totalSuccessfulLeads: {
+//             $sum: {
+//               $cond: [{ $eq: ["$lead_remarks", "Successful"] }, 1, 0],
+//             },
+//           },
+//         },
+//       },
+//     ]);
+
+//     // Format agents data with computed fields and leads data
+//     const formattedAgents = agents.map((agent) => {
+//       const agentLeadsStats = leadsStatsMap[agent._id.toString()] || {
+//         totalLeadsAssigned: 0,
+//         successfulLeads: 0,
+//         achievementRate: 0,
+//       };
+
+//       return {
+//         ...agent,
+//         fullName: `${agent.firstName} ${agent.lastName}`,
+//         leadsAssigned: agentLeadsStats.totalLeadsAssigned,
+//         successfulLeads: agentLeadsStats.successfulLeads,
+//         achievementRate: agentLeadsStats.achievementRate,
+//       };
+//     });
+
+//     // Count active and deactivated agents
+//     const agentStats = await User.aggregate([
+//       { $match: filter },
+//       {
+//         $group: {
+//           _id: null,
+//           totalAgents: { $sum: 1 },
+//           activeAgents: {
+//             $sum: { $cond: [{ $eq: ["$deactivated", false] }, 1, 0] },
+//           },
+//           deactivatedAgents: {
+//             $sum: { $cond: [{ $eq: ["$deactivated", true] }, 1, 0] },
+//           },
+//         },
+//       },
+//     ]);
+
+//     const statistics = {
+//       totalAgents: agentStats.length > 0 ? agentStats[0].totalAgents : 0,
+//       activeAgents: agentStats.length > 0 ? agentStats[0].activeAgents : 0,
+//       deactivatedAgents:
+//         agentStats.length > 0 ? agentStats[0].deactivatedAgents : 0,
+//       totalLeadsAssigned:
+//         overallStats.length > 0 ? overallStats[0].totalLeadsAssigned : 0,
+//       totalSuccessfulLeads:
+//         overallStats.length > 0 ? overallStats[0].totalSuccessfulLeads : 0,
+//       overallAchievementRate:
+//         overallStats.length > 0 && overallStats[0].totalLeadsAssigned > 0
+//           ? (
+//               (overallStats[0].totalSuccessfulLeads /
+//                 overallStats[0].totalLeadsAssigned) *
+//               100
+//             ).toFixed(2)
+//           : 0,
+//     };
+
+//     res.status(200).json({
+//       success: true,
+//       data: {
+//         agents: formattedAgents,
+//         pagination: {
+//           currentPage: pageNum,
+//           totalPages,
+//           totalAgents,
+//           hasNextPage: pageNum < totalPages,
+//           hasPrevPage: pageNum > 1,
+//           limit: limitNum,
+//         },
+//         statistics,
+//       },
+//     });
+//   } catch (error) {
+//     console.error("Error fetching data tech sales agents:", error);
+//     res.status(500).json({
+//       success: false,
+//       error: "Failed to fetch data tech sales agents",
+//       details: error.message,
+//     });
+//   }
+// };
 const getDataTechSalesAgentsForLeads = async (req, res) => {
   try {
     // Get only active data tech sales agents with essential fields

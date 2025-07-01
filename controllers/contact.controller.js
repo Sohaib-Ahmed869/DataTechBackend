@@ -4,6 +4,7 @@ const createEmailTemplate = require("../utils/emailTemplate");
 const ContactForm = require("../models/Contact.model"); // Adjust path as needed
 const Leads = require("../models/Leads.model");
 const NotificationService = require("../utils/notificationService");
+const { createLeadTask } = require("./task.controller");
 const submitContactForm = async (req, res) => {
   try {
     const formData = req.body;
@@ -66,6 +67,8 @@ const submitContactForm = async (req, res) => {
 
     const newLead = new Leads(leadData);
     const savedLead = await newLead.save();
+    await createLeadTask(savedLead);
+
     try {
       await NotificationService.createNewLeadNotification(savedLead);
       console.log("Admin notification created for new lead:", savedLead._id);

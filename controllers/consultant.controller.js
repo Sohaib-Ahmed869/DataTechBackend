@@ -1,5 +1,6 @@
 const transporter = require("../config/emailConfig");
 const createEmailTemplate = require("../utils/emailTemplate");
+const { createLeadTask } = require("./task.controller");
 
 const ConsultationForm = require("../models/ConsultationService.model"); // Adjust path as needed
 const Leads = require("../models/Leads.model");
@@ -69,6 +70,7 @@ const submitConsultantServicesForm = async (req, res) => {
 
     const newLead = new Leads(leadData);
     const savedLead = await newLead.save();
+    await createLeadTask(savedLead);
 
     console.log("Lead created successfully:", savedLead._id);
     try {

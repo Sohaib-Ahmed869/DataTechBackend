@@ -29,10 +29,11 @@ const LeadsSchema = new mongoose.Schema(
       ],
       required: true,
     },
+    // Updated status enum to match task system
     lead_status: {
       type: String,
-      enum: ["New", "In Progress", "Closed"],
-      default: "New",
+      enum: ["pending", "awaiting_approval", "approved", "rejected"],
+      default: "pending",
     },
     lead_remarks: {
       type: String,
@@ -71,6 +72,15 @@ const LeadsSchema = new mongoose.Schema(
         "GeneralInformationForm",
         "TaxServicesForm",
       ],
+    },
+    customer_created: {
+      type: Boolean,
+      default: false,
+    },
+    customer_id: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Customer",
+      required: false,
     },
   },
   {

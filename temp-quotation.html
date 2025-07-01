@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quotation #7</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Arial', sans-serif;
+            font-size: 12px;
+            line-height: 1.4;
+            color: #333;
+            background-color: #fff;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        /* Header */
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 30px;
+            padding-bottom: 20px;
+            border-bottom: 3px solid #2563eb;
+        }
+
+        .company-info {
+            flex: 1;
+        }
+
+        .company-logo {
+            max-width: 200px;
+            max-height: 80px;
+            margin-bottom: 10px;
+        }
+
+        .company-name {
+            font-size: 24px;
+            font-weight: bold;
+            color: #2563eb;
+            margin-bottom: 5px;
+        }
+
+        .company-details {
+            color: #666;
+            line-height: 1.6;
+        }
+
+        .quotation-info {
+            text-align: right;
+            flex: 1;
+        }
+
+        .quotation-title {
+            font-size: 28px;
+            font-weight: bold;
+            color: #2563eb;
+            margin-bottom: 10px;
+        }
+
+        .quotation-number {
+            font-size: 18px;
+            font-weight: bold;
+            color: #333;
+            margin-bottom: 15px;
+        }
+
+        .quotation-dates {
+            background-color: #f8fafc;
+            padding: 15px;
+            border-radius: 8px;
+            border-left: 4px solid #2563eb;
+        }
+
+        .date-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 5px;
+        }
+
+        .date-label {
+            font-weight: bold;
+            color: #374151;
+        }
+
+        /* Customer Info */
+        .customer-section {
+            margin: 30px 0;
+        }
+
+        .section-title {
+            font-size: 16px;
+            font-weight: bold;
+            color: #2563eb;
+            margin-bottom: 15px;
+            padding-bottom: 5px;
+            border-bottom: 2px solid #e5e7eb;
+        }
+
+        .customer-info {
+            background-color: #f8fafc;
+            padding: 20px;
+            border-radius: 8px;
+            border-left: 4px solid #2563eb;
+        }
+
+        .customer-name {
+            font-size: 16px;
+            font-weight: bold;
+            color: #1f2937;
+            margin-bottom: 10px;
+        }
+
+        /* Items Table */
+        .items-section {
+            margin: 30px 0;
+        }
+
+        .items-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 20px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        .items-table th {
+            background-color: #2563eb;
+            color: white;
+            padding: 15px 10px;
+            text-align: left;
+            font-weight: bold;
+            font-size: 13px;
+        }
+
+        .items-table td {
+            padding: 12px 10px;
+            border-bottom: 1px solid #e5e7eb;
+        }
+
+        .items-table tr:nth-child(even) {
+            background-color: #f8fafc;
+        }
+
+        .items-table tr:hover {
+            background-color: #e0f2fe;
+        }
+
+        .text-right {
+            text-align: right;
+        }
+
+        .text-center {
+            text-align: center;
+        }
+
+        /* Totals */
+        .totals-section {
+            margin: 30px 0;
+            display: flex;
+            justify-content: flex-end;
+        }
+
+        .totals-table {
+            width: 300px;
+            border-collapse: collapse;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        .totals-table td {
+            padding: 12px 15px;
+            border-bottom: 1px solid #e5e7eb;
+        }
+
+        .totals-table .label {
+            font-weight: bold;
+            color: #374151;
+            background-color: #f8fafc;
+        }
+
+        .totals-table .value {
+            text-align: right;
+            font-weight: bold;
+        }
+
+        .totals-table .total-row {
+            background-color: #2563eb;
+            color: white;
+            font-size: 16px;
+            font-weight: bold;
+        }
+
+        .totals-table .total-row td {
+            border-bottom: none;
+        }
+
+        /* Footer */
+        .footer {
+            margin-top: 50px;
+            padding-top: 20px;
+            border-top: 2px solid #e5e7eb;
+            text-align: center;
+            color: #666;
+            font-size: 11px;
+        }
+
+        .footer-section {
+            margin-bottom: 15px;
+        }
+
+        .footer-title {
+            font-weight: bold;
+            color: #2563eb;
+            margin-bottom: 5px;
+        }
+
+        /* Comments */
+        .comments-section {
+            margin: 30px 0;
+        }
+
+        .comments-box {
+            background-color: #f8fafc;
+            padding: 20px;
+            border-radius: 8px;
+            border-left: 4px solid #2563eb;
+            font-style: italic;
+        }
+
+        /* Sales Agent */
+        .sales-agent {
+            margin: 20px 0;
+            text-align: right;
+        }
+
+        .sales-agent-label {
+            font-weight: bold;
+            color: #374151;
+        }
+
+        .sales-agent-name {
+            color: #2563eb;
+            font-weight: bold;
+        }
+
+        /* Responsive adjustments for PDF */
+        @media print {
+            .container {
+                padding: 10px;
+            }
+            
+            .header {
+                margin-bottom: 20px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <div class="company-info">
+                <img src="https://bexbucket.s3.eu-north-1.amazonaws.com/datatechImage/DataTechFinal-06.png" alt="DataTech Solutions" class="company-logo">
+                <div class="company-name">DataTech Solutions</div>
+                <div class="company-details">
+                    123 Business Avenue<br>
+                    Tech City, 12345<br>
+                    Ireland<br>
+                    Phone: +353 1 234 5678<br>
+                    Email: info@datatech.ie<br>
+                    Website: www.datatech.ie
+                </div>
+            </div>
+            <div class="quotation-info">
+                <div class="quotation-title">QUOTATION</div>
+                <div class="quotation-number">Quote #7</div>
+                <div class="quotation-dates">
+                    <div class="date-row">
+                        <span class="date-label">Quote Date:</span>
+                        <span>26-06-2025</span>
+                    </div>
+                    <div class="date-row">
+                        <span class="date-label">Valid Until:</span>
+                        <span>31-07-2025</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Sales Agent -->
+        <div class="sales-agent">
+            <span class="sales-agent-label">Sales Representative:</span>
+            <span class="sales-agent-name">Micheal flemming</span>
+        </div>
+
+        <!-- Customer Information -->
+        <div class="customer-section">
+            <div class="section-title">Bill To:</div>
+            <div class="customer-info">
+                <div class="customer-name">TechCorp Solutions SARL</div>
+            </div>
+        </div>
+
+        <!-- Items Table -->
+        <div class="items-section">
+            <div class="section-title">Items & Services</div>
+            <table class="items-table">
+                <thead>
+                    <tr>
+                        <th style="width: 15%;">Item Code</th>
+                        <th style="width: 40%;">Description</th>
+                        <th style="width: 10%;" class="text-center">Qty</th>
+                        <th style="width: 15%;" class="text-right">Unit Price</th>
+                        <th style="width: 20%;" class="text-right">Total</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>business-growth</td>
+                        <td>Strategic business development and growth consulting</td>
+                        <td class="text-center">1</td>
+                        <td class="text-right">€2500.00</td>
+                        <td class="text-right">€2500.00</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Totals -->
+        <div class="totals-section">
+            <table class="totals-table">
+                <tr>
+                    <td class="label">Subtotal:</td>
+                    <td class="value">€2500.00</td>
+                </tr>
+                <tr>
+                    <td class="label">VAT (21%):</td>
+                    <td class="value">€525.00</td>
+                </tr>
+                <tr class="total-row">
+                    <td>Total Amount:</td>
+                    <td>€3025.00</td>
+                </tr>
+            </table>
+        </div>
+
+        <!-- Comments -->
+     
+
+        <!-- Footer -->
+        <div class="footer">
+            <div class="footer-section">
+                <div class="footer-title">DataTech Solutions</div>
+                <div>123 Business Avenue, Tech City, 12345, Ireland</div>
+            </div>
+            
+            <div class="footer-section">
+                <div class="footer-title">Contact Information</div>
+                <div>Phone: +353 1 234 5678 | Email: info@datatech.ie | Website: www.datatech.ie</div>
+            </div>
+            
+            <div class="footer-section">
+                <div class="footer-title">Banking Details</div>
+                <div>Bank of Ireland | IBAN: IE29 AIBK 9311 5212 3456 78 | SWIFT/BIC: BOFIIE2D</div>
+                <div>VAT Number: IE1234567T</div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

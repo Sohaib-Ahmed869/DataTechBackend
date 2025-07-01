@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quotation #{{quotation.DocNum}}</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Arial', sans-serif;
+            font-size: 12px;
+            line-height: 1.4;
+            color: #333;
+            background-color: #fff;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        /* Header */
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 30px;
+            padding-bottom: 20px;
+            border-bottom: 3px solid #2563eb;
+        }
+
+        .company-info {
+            flex: 1;
+        }
+
+        .company-logo {
+            max-width: 200px;
+            max-height: 80px;
+            margin-bottom: 10px;
+        }
+
+        .company-name {
+            font-size: 24px;
+            font-weight: bold;
+            color: #2563eb;
+            margin-bottom: 5px;
+        }
+
+        .company-details {
+            color: #666;
+            line-height: 1.6;
+        }
+
+        .quotation-info {
+            text-align: right;
+            flex: 1;
+        }
+
+        .quotation-title {
+            font-size: 28px;
+            font-weight: bold;
+            color: #2563eb;
+            margin-bottom: 10px;
+        }
+
+        .quotation-number {
+            font-size: 18px;
+            font-weight: bold;
+            color: #333;
+            margin-bottom: 15px;
+        }
+
+        .quotation-dates {
+            background-color: #f8fafc;
+            padding: 15px;
+            border-radius: 8px;
+            border-left: 4px solid #2563eb;
+        }
+
+        .date-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 5px;
+        }
+
+        .date-label {
+            font-weight: bold;
+            color: #374151;
+        }
+
+        /* Customer Info */
+        .customer-section {
+            margin: 30px 0;
+        }
+
+        .section-title {
+            font-size: 16px;
+            font-weight: bold;
+            color: #2563eb;
+            margin-bottom: 15px;
+            padding-bottom: 5px;
+            border-bottom: 2px solid #e5e7eb;
+        }
+
+        .customer-info {
+            background-color: #f8fafc;
+            padding: 20px;
+            border-radius: 8px;
+            border-left: 4px solid #2563eb;
+        }
+
+        .customer-name {
+            font-size: 16px;
+            font-weight: bold;
+            color: #1f2937;
+            margin-bottom: 10px;
+        }
+
+        /* Items Table */
+        .items-section {
+            margin: 30px 0;
+        }
+
+        .items-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 20px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        .items-table th {
+            background-color: #2563eb;
+            color: white;
+            padding: 15px 10px;
+            text-align: left;
+            font-weight: bold;
+            font-size: 13px;
+        }
+
+        .items-table td {
+            padding: 12px 10px;
+            border-bottom: 1px solid #e5e7eb;
+        }
+
+        .items-table tr:nth-child(even) {
+            background-color: #f8fafc;
+        }
+
+        .items-table tr:hover {
+            background-color: #e0f2fe;
+        }
+
+        .text-right {
+            text-align: right;
+        }
+
+        .text-center {
+            text-align: center;
+        }
+
+        /* Totals */
+        .totals-section {
+            margin: 30px 0;
+            display: flex;
+            justify-content: flex-end;
+        }
+
+        .totals-table {
+            width: 300px;
+            border-collapse: collapse;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        .totals-table td {
+            padding: 12px 15px;
+            border-bottom: 1px solid #e5e7eb;
+        }
+
+        .totals-table .label {
+            font-weight: bold;
+            color: #374151;
+            background-color: #f8fafc;
+        }
+
+        .totals-table .value {
+            text-align: right;
+            font-weight: bold;
+        }
+
+        .totals-table .total-row {
+            background-color: #2563eb;
+            color: white;
+            font-size: 16px;
+            font-weight: bold;
+        }
+
+        .totals-table .total-row td {
+            border-bottom: none;
+        }
+
+        /* Footer */
+        .footer {
+            margin-top: 50px;
+            padding-top: 20px;
+            border-top: 2px solid #e5e7eb;
+            text-align: center;
+            color: #666;
+            font-size: 11px;
+        }
+
+        .footer-section {
+            margin-bottom: 15px;
+        }
+
+        .footer-title {
+            font-weight: bold;
+            color: #2563eb;
+            margin-bottom: 5px;
+        }
+
+        /* Comments */
+        .comments-section {
+            margin: 30px 0;
+        }
+
+        .comments-box {
+            background-color: #f8fafc;
+            padding: 20px;
+            border-radius: 8px;
+            border-left: 4px solid #2563eb;
+            font-style: italic;
+        }
+
+        /* Sales Agent */
+        .sales-agent {
+            margin: 20px 0;
+            text-align: right;
+        }
+
+        .sales-agent-label {
+            font-weight: bold;
+            color: #374151;
+        }
+
+        .sales-agent-name {
+            color: #2563eb;
+            font-weight: bold;
+        }
+
+        /* Responsive adjustments for PDF */
+        @media print {
+            .container {
+                padding: 10px;
+            }
+            
+            .header {
+                margin-bottom: 20px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <div class="company-info">
+                <img src="{{logoUrl}}" alt="{{companyInfo.name}}" class="company-logo">
+                <div class="company-name">{{companyInfo.name}}</div>
+                <div class="company-details">
+                    {{companyInfo.address}}<br>
+                    {{companyInfo.city}}, {{companyInfo.zipCode}}<br>
+                    {{companyInfo.country}}<br>
+                    Phone: {{companyInfo.phone}}<br>
+                    Email: {{companyInfo.email}}<br>
+                    Website: {{companyInfo.website}}
+                </div>
+            </div>
+            <div class="quotation-info">
+                <div class="quotation-title">QUOTATION</div>
+                <div class="quotation-number">Quote #{{quotation.DocNum}}</div>
+                <div class="quotation-dates">
+                    <div class="date-row">
+                        <span class="date-label">Quote Date:</span>
+                        <span>{{quotation.formattedDocDate}}</span>
+                    </div>
+                    <div class="date-row">
+                        <span class="date-label">Valid Until:</span>
+                        <span>{{quotation.formattedDocDueDate}}</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Sales Agent -->
+        {{#if quotation.salesAgent}}
+        <div class="sales-agent">
+            <span class="sales-agent-label">Sales Representative:</span>
+            <span class="sales-agent-name">{{quotation.salesAgent.firstName}} {{quotation.salesAgent.lastName}}</span>
+        </div>
+        {{/if}}
+
+        <!-- Customer Information -->
+        <div class="customer-section">
+            <div class="section-title">Bill To:</div>
+            <div class="customer-info">
+                <div class="customer-name">{{customer.CardName}}</div>
+                {{#if customer.street}}
+                <div>{{customer.street}}</div>
+                {{/if}}
+                {{#if customer.city}}
+                <div>{{customer.city}}{{#if customer.zipCode}}, {{customer.zipCode}}{{/if}}</div>
+                {{/if}}
+                {{#if customer.Country}}
+                <div>{{customer.Country}}</div>
+                {{/if}}
+                {{#if customer.Phone}}
+                <div>Phone: {{customer.Phone}}</div>
+                {{/if}}
+            </div>
+        </div>
+
+        <!-- Items Table -->
+        <div class="items-section">
+            <div class="section-title">Items & Services</div>
+            <table class="items-table">
+                <thead>
+                    <tr>
+                        <th style="width: 15%;">Item Code</th>
+                        <th style="width: 40%;">Description</th>
+                        <th style="width: 10%;" class="text-center">Qty</th>
+                        <th style="width: 15%;" class="text-right">Unit Price</th>
+                        <th style="width: 20%;" class="text-right">Total</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {{#each quotation.DocumentLines}}
+                    <tr>
+                        <td>{{this.ItemCode}}</td>
+                        <td>{{this.ItemDescription}}</td>
+                        <td class="text-center">{{this.Quantity}}</td>
+                        <td class="text-right">€{{this.Price}}</td>
+                        <td class="text-right">€{{this.LineTotal}}</td>
+                    </tr>
+                    {{/each}}
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Totals -->
+        <div class="totals-section">
+            <table class="totals-table">
+                <tr>
+                    <td class="label">Subtotal:</td>
+                    <td class="value">€{{quotation.subtotal}}</td>
+                </tr>
+                <tr>
+                    <td class="label">VAT (21%):</td>
+                    <td class="value">€{{quotation.vat}}</td>
+                </tr>
+                <tr class="total-row">
+                    <td>Total Amount:</td>
+                    <td>€{{quotation.totalTTC}}</td>
+                </tr>
+            </table>
+        </div>
+
+        <!-- Comments -->
+     
+
+        <!-- Footer -->
+        <div class="footer">
+            <div class="footer-section">
+                <div class="footer-title">{{companyInfo.name}}</div>
+                <div>{{companyInfo.address}}, {{companyInfo.city}}, {{companyInfo.zipCode}}, {{companyInfo.country}}</div>
+            </div>
+            
+            <div class="footer-section">
+                <div class="footer-title">Contact Information</div>
+                <div>Phone: {{companyInfo.phone}} | Email: {{companyInfo.email}} | Website: {{companyInfo.website}}</div>
+            </div>
+            
+            <div class="footer-section">
+                <div class="footer-title">Banking Details</div>
+                <div>{{companyInfo.bankName}} | IBAN: {{companyInfo.iban}} | SWIFT/BIC: {{companyInfo.swift}}</div>
+                <div>VAT Number: {{companyInfo.vatNumber}}</div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

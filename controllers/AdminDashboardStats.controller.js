@@ -1,5 +1,7 @@
 const Leads = require("../models/Leads.model");
 const User = require("../models/user.model");
+const Quotation = require("../models/Quotation.model"); // Add quotation model
+
 const getAdminDashboardStats = async (req, res) => {
   try {
     // Get current date and week start date
@@ -15,13 +17,16 @@ const getAdminDashboardStats = async (req, res) => {
     // 1. Get total leads count
     const totalLeads = await Leads.countDocuments();
 
-    // 2. Get total sales agents count
+    // 2. Get total quotations count
+    const totalQuotations = await Quotation.countDocuments({ IsActive: true });
+
+    // 3. Get total sales agents count
     const totalSalesAgents = await User.countDocuments({
       role: { $in: ["sales_agent", "data_tech_sales_agent"] },
       deactivated: false,
     });
 
-    // 3. Get leads assigned to each agent
+    // 4. Get leads assigned to each agent
     const leadsPerAgent = await Leads.aggregate([
       {
         $match: {
@@ -67,7 +72,55 @@ const getAdminDashboardStats = async (req, res) => {
       },
     ]);
 
-    // 4. Get unassigned leads count
+    // 5. Get quotations assigned to each agent
+    const quotationsPerAgent = await Quotation.aggregate([
+      {
+        $match: {
+          salesAgent: { $ne: null },
+          IsActive: true,
+        },
+      },
+      {
+        $group: {
+          _id: "$salesAgent",
+          quotationCount: { $sum: 1 },
+          totalValue: { $sum: "$DocTotal" },
+        },
+      },
+      {
+        $lookup: {
+          from: "users",
+          localField: "_id",
+          foreignField: "_id",
+          as: "agentDetails",
+        },
+      },
+      {
+        $project: {
+          agentId: "$_id",
+          quotationCount: 1,
+          totalValue: 1,
+          agentName: {
+            $cond: {
+              if: { $gt: [{ $size: "$agentDetails" }, 0] },
+              then: {
+                $concat: [
+                  { $arrayElemAt: ["$agentDetails.firstName", 0] },
+                  " ",
+                  { $arrayElemAt: ["$agentDetails.lastName", 0] },
+                ],
+              },
+              else: "Unknown Agent",
+            },
+          },
+        },
+      },
+      {
+        $sort: { quotationCount: -1 },
+      },
+    ]);
+
+    // 6. Get unassigned leads count
     const unassignedLeads = await Leads.countDocuments({
       $or: [
         { assigned_agent_id: null },
@@ -75,7 +128,13 @@ const getAdminDashboardStats = async (req, res) => {
       ],
     });
 
-    // 5. Get leads by status
+    // 7. Get unassigned quotations count
+    const unassignedQuotations = await Quotation.countDocuments({
+      $or: [{ salesAgent: null }, { salesAgent: { $exists: false } }],
+      IsActive: true,
+    });
+
+    // 8. Get leads by status
     const leadsByStatus = await Leads.aggregate([
       {
         $group: {
@@ -85,7 +144,21 @@ const getAdminDashboardStats = async (req, res) => {
       },
     ]);
 
-    // 6. Get leads received this week for graph (daily breakdown)
+    // 9. Get quotations by approval status
+    const quotationsByStatus = await Quotation.aggregate([
+      {
+        $match: { IsActive: true },
+      },
+      {
+        $group: {
+          _id: "$approvalStatus",
+          count: { $sum: 1 },
+          totalValue: { $sum: "$DocTotal" },
+        },
+      },
+    ]);
+
+    // 10. Get leads received this week for graph (daily breakdown)
     const leadsThisWeek = await Leads.aggregate([
       {
         $match: {
@@ -116,52 +189,137 @@ const getAdminDashboardStats = async (req, res) => {
       },
     ]);
 
+    // 11. Get quotations created this week for graph (daily breakdown)
+    const quotationsThisWeek = await Quotation.aggregate([
+      {
+        $match: {
+          createdAt: {
+            $gte: startOfWeek,
+            $lte: endOfWeek,
+          },
+          IsActive: true,
+        },
+      },
+      {
+        $group: {
+          _id: {
+            $dayOfWeek: "$createdAt",
+          },
+          count: { $sum: 1 },
+          totalValue: { $sum: "$DocTotal" },
+          date: {
+            $first: {
+              $dateToString: {
+                format: "%Y-%m-%d",
+                date: "$createdAt",
+              },
+            },
+          },
+        },
+      },
+      {
+        $sort: { _id: 1 },
+      },
+    ]);
+
     // Transform weekly data for frontend consumption
     const daysOfWeek = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
     const weeklyGraphData = [];
 
     for (let i = 0; i < 7; i++) {
-      const dayData = leadsThisWeek.find((day) => day._id === i + 1);
+      const leadData = leadsThisWeek.find((day) => day._id === i + 1);
+      const quotationData = quotationsThisWeek.find((day) => day._id === i + 1);
       const currentDate = new Date(startOfWeek);
       currentDate.setDate(startOfWeek.getDate() + i);
 
       weeklyGraphData.push({
         day: daysOfWeek[i],
         date: currentDate.toISOString().split("T")[0],
-        leads: dayData ? dayData.count : 0,
+        leads: leadData ? leadData.count : 0,
+        quotations: quotationData ? quotationData.count : 0,
+        quotationValue: quotationData ? quotationData.totalValue : 0,
       });
     }
 
-    // 7. Get recent activity (last 10 leads)
-    const recentActivity = await Leads.find()
+    // 12. Get recent activity (last 10 leads and quotations combined)
+    const recentLeads = await Leads.find()
       .populate("assigned_agent_id", "firstName lastName")
       .sort({ createdAt: -1 })
-      .limit(10)
+      .limit(5)
       .select("name lead_type lead_status createdAt assigned_agent_name")
       .lean();
 
-    // 8. Calculate conversion rate
-    const totalClosedLeads = await Leads.countDocuments({
-      lead_status: "Closed",
-    });
-    const successfulLeads = await Leads.countDocuments({
-      lead_remarks: "Successful",
-    });
-    const conversionRate =
-      totalLeads > 0 ? ((successfulLeads / totalLeads) * 100).toFixed(1) : 0;
+    const recentQuotations = await Quotation.find({ IsActive: true })
+      .populate("salesAgent", "firstName lastName")
+      .sort({ createdAt: -1 })
+      .limit(5)
+      .select("CardName DocTotal approvalStatus createdAt salesAgent DocNum")
+      .lean();
 
-    // 9. Get top performing agents (by successful leads)
-    const topPerformers = await Leads.aggregate([
+    // Combine and sort recent activities
+    const recentActivity = [
+      ...recentLeads.map((lead) => ({
+        id: lead._id,
+        type: "lead",
+        name: lead.name,
+        subType: lead.lead_type,
+        status: lead.lead_status,
+        agent: lead.assigned_agent_name || "Unassigned",
+        createdAt: lead.createdAt,
+        timeAgo: getTimeAgo(lead.createdAt),
+        value: null,
+      })),
+      ...recentQuotations.map((quotation) => ({
+        id: quotation._id,
+        type: "quotation",
+        name: quotation.CardName,
+        subType: `Quotation #${quotation.DocNum}`,
+        status: quotation.approvalStatus,
+        agent: quotation.salesAgent
+          ? `${quotation.salesAgent.firstName} ${quotation.salesAgent.lastName}`
+          : "Unassigned",
+        createdAt: quotation.createdAt,
+        timeAgo: getTimeAgo(quotation.createdAt),
+        value: quotation.DocTotal,
+      })),
+    ]
+      .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+      .slice(0, 10);
+
+    // 13. Calculate conversion rates
+    const approvedLeads = await Leads.countDocuments({
+      $or: [{ lead_status: "approved" }, { lead_remarks: "Successful" }],
+    });
+
+    const approvedQuotations = await Quotation.countDocuments({
+      approvalStatus: "approved",
+      IsActive: true,
+    });
+
+    const totalItems = totalLeads + totalQuotations;
+    const totalApproved = approvedLeads + approvedQuotations;
+    const overallConversionRate =
+      totalItems > 0 ? ((totalApproved / totalItems) * 100).toFixed(1) : 0;
+
+    const leadsConversionRate =
+      totalLeads > 0 ? ((approvedLeads / totalLeads) * 100).toFixed(1) : 0;
+    const quotationsConversionRate =
+      totalQuotations > 0
+        ? ((approvedQuotations / totalQuotations) * 100).toFixed(1)
+        : 0;
+
+    // 14. Get top performing agents (by approved leads and quotations)
+    const topPerformersLeads = await Leads.aggregate([
       {
         $match: {
           assigned_agent_id: { $ne: null },
-          lead_remarks: "Successful",
+          $or: [{ lead_status: "approved" }, { lead_remarks: "Successful" }],
         },
       },
       {
         $group: {
           _id: "$assigned_agent_id",
-          successfulLeads: { $sum: 1 },
+          approvedLeads: { $sum: 1 },
           agentName: { $first: "$assigned_agent_name" },
         },
       },
@@ -176,7 +334,7 @@ const getAdminDashboardStats = async (req, res) => {
       {
         $project: {
           agentId: "$_id",
-          successfulLeads: 1,
+          approvedLeads: 1,
           agentName: {
             $cond: {
               if: { $gt: [{ $size: "$agentDetails" }, 0] },
@@ -193,13 +351,110 @@ const getAdminDashboardStats = async (req, res) => {
           target: { $arrayElemAt: ["$agentDetails.target", 0] },
         },
       },
+    ]);
+
+    const topPerformersQuotations = await Quotation.aggregate([
       {
-        $sort: { successfulLeads: -1 },
+        $match: {
+          salesAgent: { $ne: null },
+          approvalStatus: "approved",
+          IsActive: true,
+        },
       },
       {
-        $limit: 5,
+        $group: {
+          _id: "$salesAgent",
+          approvedQuotations: { $sum: 1 },
+          totalApprovedValue: { $sum: "$DocTotal" },
+        },
+      },
+      {
+        $lookup: {
+          from: "users",
+          localField: "_id",
+          foreignField: "_id",
+          as: "agentDetails",
+        },
+      },
+      {
+        $project: {
+          agentId: "$_id",
+          approvedQuotations: 1,
+          totalApprovedValue: 1,
+          agentName: {
+            $cond: {
+              if: { $gt: [{ $size: "$agentDetails" }, 0] },
+              then: {
+                $concat: [
+                  { $arrayElemAt: ["$agentDetails.firstName", 0] },
+                  " ",
+                  { $arrayElemAt: ["$agentDetails.lastName", 0] },
+                ],
+              },
+              else: "Unknown Agent",
+            },
+          },
+          target: { $arrayElemAt: ["$agentDetails.target", 0] },
+        },
       },
     ]);
+
+    // Combine top performers data
+    const agentPerformanceMap = new Map();
+
+    // Add leads data
+    topPerformersLeads.forEach((agent) => {
+      agentPerformanceMap.set(agent.agentId.toString(), {
+        agentId: agent.agentId,
+        agentName: agent.agentName,
+        approvedLeads: agent.approvedLeads,
+        approvedQuotations: 0,
+        totalApprovedValue: 0,
+        target: agent.target,
+      });
+    });
+
+    // Add quotations data
+    topPerformersQuotations.forEach((agent) => {
+      const existingAgent = agentPerformanceMap.get(agent.agentId.toString());
+      if (existingAgent) {
+        existingAgent.approvedQuotations = agent.approvedQuotations;
+        existingAgent.totalApprovedValue = agent.totalApprovedValue;
+      } else {
+        agentPerformanceMap.set(agent.agentId.toString(), {
+          agentId: agent.agentId,
+          agentName: agent.agentName,
+          approvedLeads: 0,
+          approvedQuotations: agent.approvedQuotations,
+          totalApprovedValue: agent.totalApprovedValue,
+          target: agent.target,
+        });
+      }
+    });
+
+    const topPerformers = Array.from(agentPerformanceMap.values())
+      .map((agent) => ({
+        ...agent,
+        totalApproved: agent.approvedLeads + agent.approvedQuotations,
+      }))
+      .sort((a, b) => b.totalApproved - a.totalApproved)
+      .slice(0, 5);
+
+    // 15. Get total quotation value
+    const totalQuotationValue = await Quotation.aggregate([
+      {
+        $match: { IsActive: true },
+      },
+      {
+        $group: {
+          _id: null,
+          totalValue: { $sum: "$DocTotal" },
+        },
+      },
+    ]);
+
+    const quotationValue =
+      totalQuotationValue.length > 0 ? totalQuotationValue[0].totalValue : 0;
 
     // Structure response for KPI cards
     const dashboardStats = {
@@ -216,6 +471,17 @@ const getAdminDashboardStats = async (req, res) => {
           },
         },
         {
+          title: "Total Quotations",
+          value: totalQuotations,
+          subtitle: `€${quotationValue.toLocaleString()} total value`,
+          icon: "file-text",
+          color: "indigo",
+          trend: {
+            percentage: 8.3,
+            isPositive: true,
+          },
+        },
+        {
           title: "Sales Agents",
           value: totalSalesAgents,
           subtitle: "Active agents",
@@ -227,20 +493,9 @@ const getAdminDashboardStats = async (req, res) => {
           },
         },
         {
-          title: "Assigned Leads",
-          value: totalLeads - unassignedLeads,
-          subtitle: `${unassignedLeads} unassigned`,
-          icon: "assignment",
-          color: "purple",
-          trend: {
-            percentage: 8.1,
-            isPositive: true,
-          },
-        },
-        {
-          title: "Conversion Rate",
-          value: `${conversionRate}%`,
-          subtitle: "Success rate",
+          title: "Overall Conversion Rate",
+          value: `${overallConversionRate}%`,
+          subtitle: `Leads: ${leadsConversionRate}% | Quotations: ${quotationsConversionRate}%`,
           icon: "trending-up",
           color: "orange",
           trend: {
@@ -251,26 +506,64 @@ const getAdminDashboardStats = async (req, res) => {
       ],
       agentPerformance: {
         leadsPerAgent,
+        quotationsPerAgent,
         topPerformers,
       },
       weeklyGraph: {
-        title: "Leads This Week",
+        title: "Weekly Activity",
         data: weeklyGraphData,
-        totalThisWeek: weeklyGraphData.reduce((sum, day) => sum + day.leads, 0),
+        totalLeadsThisWeek: weeklyGraphData.reduce(
+          (sum, day) => sum + day.leads,
+          0
+        ),
+        totalQuotationsThisWeek: weeklyGraphData.reduce(
+          (sum, day) => sum + day.quotations,
+          0
+        ),
+        totalQuotationValueThisWeek: weeklyGraphData.reduce(
+          (sum, day) => sum + day.quotationValue,
+          0
+        ),
       },
-      leadsByStatus: leadsByStatus.reduce((acc, status) => {
-        acc[status._id] = status.count;
-        return acc;
-      }, {}),
-      recentActivity: recentActivity.map((lead) => ({
-        id: lead._id,
-        name: lead.name,
-        type: lead.lead_type,
-        status: lead.lead_status,
-        agent: lead.assigned_agent_name || "Unassigned",
-        createdAt: lead.createdAt,
-        timeAgo: getTimeAgo(lead.createdAt),
-      })),
+      statusBreakdown: {
+        leads: {
+          byStatus: leadsByStatus.reduce((acc, status) => {
+            acc[status._id] = status.count;
+            return acc;
+          }, {}),
+          assigned: totalLeads - unassignedLeads,
+          unassigned: unassignedLeads,
+        },
+        quotations: {
+          byStatus: quotationsByStatus.reduce((acc, status) => {
+            acc[status._id] = {
+              count: status.count,
+              totalValue: status.totalValue,
+            };
+            return acc;
+          }, {}),
+          assigned: totalQuotations - unassignedQuotations,
+          unassigned: unassignedQuotations,
+        },
+      },
+      recentActivity: recentActivity,
+      conversionMetrics: {
+        overall: {
+          rate: overallConversionRate,
+          approved: totalApproved,
+          total: totalItems,
+        },
+        leads: {
+          rate: leadsConversionRate,
+          approved: approvedLeads,
+          total: totalLeads,
+        },
+        quotations: {
+          rate: quotationsConversionRate,
+          approved: approvedQuotations,
+          total: totalQuotations,
+        },
+      },
     };
 
     res.status(200).json({
