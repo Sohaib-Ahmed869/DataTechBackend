@@ -225,6 +225,194 @@ const getCustomersWithMetrics = async (req, res) => {
     });
   }
 };
+const getAgentAssignedCustomers = async (req, res) => {
+  // Helper function to format customer data with computed fields
+  const formatCustomerData = (customer) => {
+    // Generate full name
+    const fullName =
+      customer.firstName && customer.lastName
+        ? `${customer.firstName} ${customer.lastName}`.trim()
+        : (customer.firstName || customer.CardName || "").trim();
+
+    // Generate initials
+    const initials =
+      customer.firstName && customer.lastName
+        ? `${customer.firstName.charAt(0)}${customer.lastName.charAt(
+            0
+          )}`.toUpperCase()
+        : customer.firstName
+        ? customer.firstName.charAt(0).toUpperCase()
+        : customer.CardName
+        ? customer.CardName.charAt(0).toUpperCase()
+        : "";
+
+    // Generate full address
+    const address = customer.address || {};
+    const fullAddress =
+      [address.street, address.city, address.zipCode, address.country]
+        .filter(Boolean)
+        .join(" ")
+        .trim() ||
+      address.country ||
+      "";
+
+    // Generate display name
+    const displayName = `${fullName} (${customer.CardCode})`;
+
+    // Check if has outstanding balance
+    const hasOutstandingBalance = (customer.outstandingBalance || 0) > 0;
+
+    return {
+      _id: customer._id,
+      CardName: customer.CardName,
+      CardCode: customer.CardCode,
+      Email: customer.Email,
+      firstName: customer.firstName,
+      lastName: customer.lastName,
+      phoneNumber: customer.phoneNumber,
+      additionalPhoneNumbers: customer.additionalPhoneNumbers || [],
+      assignedTo: customer.assignedTo,
+      contactOwnerName: customer.contactOwnerName,
+      createdAt: customer.createdAt,
+      updatedAt: customer.updatedAt,
+      notes: customer.notes,
+      address: customer.address || { country: "France" },
+      outstandingBalance: customer.outstandingBalance || 0,
+      __v: customer.__v,
+      lastActivityDate: customer.lastActivityDate,
+      fullName,
+      hasOutstandingBalance,
+      fullAddress,
+      initials,
+      displayName,
+    };
+  };
+
+  try {
+    // EXTRACT AGENT ID FROM REQUEST PARAMETERS
+    const { agentId } = req.params;
+    const {
+      page = 1,
+      limit = 10,
+      search,
+      sort_by = "createdAt",
+      sort_order = "desc",
+      country,
+      hasOutstandingBalance,
+    } = req.query;
+
+    // Validate agentId exists
+    if (!agentId) {
+      return res.status(400).json({
+        success: false,
+        message: "Agent ID is required",
+      });
+    }
+
+    // FILTER CUSTOMERS BY ASSIGNED AGENT ID
+    // This will only return customers where assignedTo field matches the agentId
+    const filter = {
+      assignedTo: agentId,
+    };
+
+    // Additional filters
+    if (country) {
+      filter["address.country"] = { $regex: country, $options: "i" };
+    }
+
+    if (hasOutstandingBalance !== undefined) {
+      if (hasOutstandingBalance === "true") {
+        filter.outstandingBalance = { $gt: 0 };
+      } else if (hasOutstandingBalance === "false") {
+        filter.outstandingBalance = { $lte: 0 };
+      }
+    }
+
+    if (search) {
+      filter.$or = [
+        { CardName: { $regex: search, $options: "i" } },
+        { CardCode: { $regex: search, $options: "i" } },
+        { firstName: { $regex: search, $options: "i" } },
+        { lastName: { $regex: search, $options: "i" } },
+        { Email: { $regex: search, $options: "i" } },
+        { phoneNumber: { $regex: search, $options: "i" } },
+      ];
+    }
+
+    const pageNum = parseInt(page);
+    const limitNum = parseInt(limit);
+    const skip = (pageNum - 1) * limitNum;
+
+    const sortConfig = {};
+    sortConfig[sort_by] = sort_order === "desc" ? -1 : 1;
+
+    // FETCH ONLY CUSTOMERS ASSIGNED TO THE SPECIFIC AGENT
+    // The filter ensures we only get customers where assignedTo === agentId
+    const customers = await Customer.find(filter)
+      .populate("assignedTo", "firstName lastName email")
+      .sort(sortConfig)
+      .skip(skip)
+      .limit(limitNum)
+      .lean();
+
+    // Get metrics for each customer
+    const customersWithMetrics = await Promise.all(
+      customers.map(async (customer) => {
+        // Get sales orders count and total
+        const salesOrders = await SalesOrder.find({
+          CardCode: customer.CardCode,
+          DocumentStatus: { $ne: "Cancelled" },
+        });
+
+        const salesOrderCount = salesOrders.length;
+        const salesOrderTotal = salesOrders.reduce(
+          (sum, order) => sum + (order.DocTotal || 0),
+          0
+        );
+
+        // Get active quotations count
+        const activeQuotations = await Quotation.find({
+          CardCode: customer.CardCode,
+          IsActive: true,
+        });
+
+        const quotationCount = activeQuotations.length;
+
+        return {
+          ...formatCustomerData(customer),
+          salesOrderCount,
+          salesOrderTotal,
+          quotationCount,
+        };
+      })
+    );
+
+    const totalCustomers = await Customer.countDocuments(filter);
+    const totalPages = Math.ceil(totalCustomers / limitNum);
+
+    res.status(200).json({
+      success: true,
+      data: {
+        customers: customersWithMetrics,
+        pagination: {
+          currentPage: pageNum,
+          totalPages,
+          totalCustomers,
+          hasNextPage: pageNum < totalPages,
+          hasPrevPage: pageNum > 1,
+          limit: limitNum,
+        },
+      },
+    });
+  } catch (error) {
+    console.error("Error fetching agent assigned customers:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch agent assigned customers",
+      error: error.message,
+    });
+  }
+};
 
 // Add this function to assign sales agent to customer
 const assignSalesAgent = async (req, res) => {
@@ -772,4 +960,5 @@ module.exports = {
   getCustomerStats,
   getCustomersWithMetrics,
   assignSalesAgent,
+  getAgentAssignedCustomers,
 };

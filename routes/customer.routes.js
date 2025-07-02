@@ -10,6 +10,7 @@ const {
   getCustomersWithMetrics,
   assignSalesAgent,
   getCustomerStats,
+  getAgentAssignedCustomers,
 } = require("../controllers/customer.controller");
 
 const router = express.Router();
@@ -34,6 +35,7 @@ router.put("/:customerId/assign-agent", assignSalesAgent);
 // Get single customer by ID
 
 router.get("/:id", getCustomerById);
+router.get("/agent-assigned-customers/:agentId", getAgentAssignedCustomers);
 
 // Search customers (must be before /:id route)
 router.get("/search", searchCustomers);
