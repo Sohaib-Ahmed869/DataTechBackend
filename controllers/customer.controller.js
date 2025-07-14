@@ -1,7 +1,78 @@
 const Customer = require("../models/Customer.model");
 const Quotation = require("../models/Quotation.model");
 const SalesOrder = require("../models/SalesOrder.model");
-// Create a new customer
+const {
+  generateNextCardCode,
+  formatCustomerForSAP,
+  createCustomerInSAP,
+  checkCustomerExistsInSAP,
+} = require("../utils/sapB1CustomerIntegration");
+
+// Helper function to format customer data
+
+async function pushCustomerToSAPInternal(customer) {
+  try {
+    console.log("🚀 Starting SAP push for customer:", customer.CardCode);
+
+    // Format the customer for SAP B1 using the working configuration
+    const sapCustomer = await formatCustomerForSAP(customer);
+
+    // Push to SAP B1
+    const sapResponse = await createCustomerInSAP(sapCustomer);
+
+    // Update local customer with SAP sync status if successful
+    if (sapResponse && (sapResponse.CardCode || !sapResponse.simulated)) {
+      customer.SyncedWithSAP = true;
+      customer.LocalStatus = "Synced";
+      customer.customerType = "sap";
+      customer.updatedAt = new Date();
+
+      // Clear any previous errors
+      customer.SyncErrors = undefined;
+      customer.SAPSyncDisabled = false;
+
+      await customer.save();
+
+      console.log(
+        "✅ Customer successfully synced with SAP:",
+        sapResponse.CardCode || customer.CardCode
+      );
+
+      return {
+        success: true,
+        CardCode: sapResponse.CardCode || customer.CardCode,
+        sapData: sapResponse,
+      };
+    } else {
+      throw new Error("Invalid response from SAP B1");
+    }
+  } catch (error) {
+    console.error("❌ Error pushing customer to SAP:", error.message);
+
+    // Update local customer to mark sync failure
+    customer.SyncErrors = error.message;
+    customer.LastSyncAttempt = new Date();
+    customer.LocalStatus = "SyncFailed";
+
+    await customer.save();
+
+    return {
+      success: false,
+      error: error.message || "Unknown error",
+    };
+  }
+}
+
+// Helper function to sanitize assignedTo field
+const sanitizeAssignedTo = (assignedTo) => {
+  // If assignedTo is empty string, null, undefined, or whitespace, return null
+  if (!assignedTo || assignedTo.toString().trim() === "") {
+    return null;
+  }
+  return assignedTo;
+};
+
+// UPDATED: Create a new customer with numeric CardCode generation (0001, 0002, etc.)
 const createCustomer = async (req, res) => {
   try {
     const {
@@ -50,15 +121,47 @@ const createCustomer = async (req, res) => {
       }
     }
 
-    // Generate CardCode if not provided
+    // Generate numeric CardCode if not provided (0001, 0002, 0003, etc.)
     let generatedCardCode = CardCode;
     if (!generatedCardCode) {
-      const nameCode = CardName.replace(/\s+/g, "")
-        .substring(0, 6)
-        .toUpperCase();
-      const timestamp = Date.now().toString().slice(-4);
-      generatedCardCode = `${nameCode}${timestamp}`;
+      try {
+        // Try to get next SAP CardCode in numeric format
+        generatedCardCode = await generateNextCardCode();
+        console.log(`✅ Generated numeric SAP CardCode: ${generatedCardCode}`);
+      } catch (error) {
+        console.warn(
+          "⚠️  Failed to generate SAP CardCode, using fallback:",
+          error.message
+        );
+
+        // Fallback to local generation - find highest numeric CardCode in local DB
+        try {
+          const lastLocalCustomer = await Customer.findOne({
+            CardCode: { $regex: /^\d{4}$/ }, // Find 4-digit numeric CardCodes
+          }).sort({ CardCode: -1 });
+
+          if (lastLocalCustomer) {
+            const lastNumber = Number.parseInt(lastLocalCustomer.CardCode, 10);
+            generatedCardCode = (lastNumber + 1).toString().padStart(4, "0");
+          } else {
+            generatedCardCode = "0001";
+          }
+          console.log(`✅ Generated fallback CardCode: ${generatedCardCode}`);
+        } catch (localError) {
+          console.error("Failed to generate fallback CardCode:", localError);
+          generatedCardCode = "0001";
+        }
+      }
     }
+
+    // Sanitize assignedTo field to handle empty strings
+    const sanitizedAssignedTo = sanitizeAssignedTo(assignedTo);
+
+    console.log("📝 Creating customer with assignedTo:", {
+      original: assignedTo,
+      sanitized: sanitizedAssignedTo,
+      type: typeof sanitizedAssignedTo,
+    });
 
     // Create new customer
     const newCustomer = new Customer({
@@ -69,16 +172,32 @@ const createCustomer = async (req, res) => {
       lastName,
       phoneNumber,
       additionalPhoneNumbers,
-      assignedTo,
+      assignedTo: sanitizedAssignedTo, // Use sanitized value
       contactOwnerName,
       notes,
       companyId,
       address,
       outstandingBalance: outstandingBalance || 0,
       lastActivityDate: new Date(),
+      // SAP Integration fields
+      SyncedWithSAP: false,
+      LocalStatus: "Created",
+      customerType: "non-sap", // Will be updated to "sap" after successful sync
     });
 
+    console.log("📝 Creating new customer:", {
+      CardName: newCustomer.CardName,
+      CardCode: newCustomer.CardCode,
+      Email: newCustomer.Email,
+      assignedTo: newCustomer.assignedTo,
+    });
+
+    // Save to local database first
     const savedCustomer = await newCustomer.save();
+
+    // Push to SAP automatically
+    console.log("🔄 Automatically pushing new customer to SAP...");
+    const sapResult = await pushCustomerToSAPInternal(savedCustomer);
 
     // Populate assignedTo field before sending response
     const populatedCustomer = await Customer.findById(savedCustomer._id)
@@ -88,16 +207,257 @@ const createCustomer = async (req, res) => {
     // Add computed fields
     const formattedCustomer = formatCustomerData(populatedCustomer);
 
-    res.status(201).json({
-      success: true,
-      message: "Customer created successfully",
-      data: formattedCustomer,
-    });
+    // Return response with both local creation and SAP push results
+    if (sapResult.success) {
+      res.status(201).json({
+        success: true,
+        message: "✅ Customer created successfully and synced with SAP",
+        data: formattedCustomer,
+        sapSync: {
+          success: true,
+          CardCode: sapResult.CardCode,
+        },
+      });
+    } else {
+      res.status(201).json({
+        success: true,
+        message:
+          "⚠️  Customer created successfully in local database but failed to sync with SAP",
+        data: formattedCustomer,
+        sapSync: {
+          success: false,
+          error: sapResult.error,
+        },
+      });
+    }
   } catch (error) {
-    console.error("Error creating customer:", error);
+    console.error("❌ Error creating customer:", error);
     res.status(500).json({
       success: false,
       message: "Server error",
+      error: error.message,
+    });
+  }
+};
+// FIXED: Manual push customer to SAP (for retry purposes)
+const pushCustomerToSAP = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const customer = await Customer.findById(id);
+
+    if (!customer) {
+      return res.status(404).json({
+        success: false,
+        message: "Customer not found",
+      });
+    }
+
+    // Check if already synced with SAP
+    if (customer.SyncedWithSAP && customer.LocalStatus === "Synced") {
+      return res.status(400).json({
+        success: false,
+        message: `Customer already synced with SAP (CardCode: ${customer.CardCode})`,
+        CardCode: customer.CardCode,
+      });
+    }
+
+    // Check if sync was previously disabled
+    if (customer.SAPSyncDisabled) {
+      // Allow force sync if specifically requested
+      if (req.query.force !== "true") {
+        return res.status(400).json({
+          success: false,
+          message: `Cannot sync customer: ${customer.SyncErrors}. Add ?force=true to override.`,
+          error: customer.SyncErrors,
+        });
+      }
+      // If force=true, continue with sync attempt and clear the flag
+      customer.SAPSyncDisabled = false;
+      await customer.save();
+    }
+
+    console.log(
+      "🔄 Manual SAP push requested for customer:",
+      customer.CardCode
+    );
+    const sapResult = await pushCustomerToSAPInternal(customer);
+
+    if (sapResult.success) {
+      return res.status(200).json({
+        success: true,
+        message: "✅ Customer successfully pushed to SAP B1",
+        CardCode: sapResult.CardCode,
+        localId: customer._id,
+        sapData: sapResult.sapData,
+      });
+    } else {
+      return res.status(400).json({
+        success: false,
+        message: "❌ Error pushing customer to SAP B1",
+        error: sapResult.error,
+      });
+    }
+  } catch (error) {
+    console.error("❌ Error in manual SAP push:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error pushing customer to SAP B1",
+      error: error.message || "Unknown error",
+    });
+  }
+};
+
+// Keep all your existing functions unchanged...
+const getAllCustomersWithSAPStatus = async (req, res) => {
+  try {
+    const {
+      page = 1,
+      limit = 10,
+      search,
+      assignedTo,
+      sort_by = "createdAt",
+      sort_order = "desc",
+      country,
+      hasOutstandingBalance,
+      sapSyncStatus,
+    } = req.query;
+
+    const filter = {};
+
+    if (assignedTo && assignedTo !== "all") {
+      if (assignedTo === "unassigned") {
+        filter.assignedTo = { $exists: false };
+      } else {
+        filter.assignedTo = assignedTo;
+      }
+    }
+
+    if (country) {
+      filter["address.country"] = { $regex: country, $options: "i" };
+    }
+
+    if (hasOutstandingBalance !== undefined) {
+      if (hasOutstandingBalance === "true") {
+        filter.outstandingBalance = { $gt: 0 };
+      } else if (hasOutstandingBalance === "false") {
+        filter.outstandingBalance = { $lte: 0 };
+      }
+    }
+
+    if (sapSyncStatus) {
+      switch (sapSyncStatus) {
+        case "synced":
+          filter.SyncedWithSAP = true;
+          filter.LocalStatus = "Synced";
+          break;
+        case "failed":
+          filter.LocalStatus = "SyncFailed";
+          break;
+        case "pending":
+          filter.LocalStatus = "Created";
+          filter.SyncedWithSAP = false;
+          break;
+        case "disabled":
+          filter.SAPSyncDisabled = true;
+          break;
+      }
+    }
+
+    if (search) {
+      filter.$or = [
+        { CardName: { $regex: search, $options: "i" } },
+        { CardCode: { $regex: search, $options: "i" } },
+        { firstName: { $regex: search, $options: "i" } },
+        { lastName: { $regex: search, $options: "i" } },
+        { Email: { $regex: search, $options: "i" } },
+        { phoneNumber: { $regex: search, $options: "i" } },
+        { contactOwnerName: { $regex: search, $options: "i" } },
+        { companyId: { $regex: search, $options: "i" } },
+      ];
+    }
+
+    const pageNum = Number.parseInt(page);
+    const limitNum = Number.parseInt(limit);
+    const skip = (pageNum - 1) * limitNum;
+
+    const sortConfig = {};
+    sortConfig[sort_by] = sort_order === "desc" ? -1 : 1;
+
+    const customers = await Customer.find(filter)
+      .populate("assignedTo", "firstName lastName email")
+      .sort(sortConfig)
+      .skip(skip)
+      .limit(limitNum)
+      .lean();
+
+    const totalCustomers = await Customer.countDocuments(filter);
+    const totalPages = Math.ceil(totalCustomers / limitNum);
+
+    const formattedCustomers = customers.map(formatCustomerData);
+
+    const sapSyncStats = await Customer.aggregate([
+      { $match: filter },
+      {
+        $group: {
+          _id: null,
+          totalCustomers: { $sum: 1 },
+          syncedWithSAP: {
+            $sum: { $cond: [{ $eq: ["$SyncedWithSAP", true] }, 1, 0] },
+          },
+          syncFailed: {
+            $sum: { $cond: [{ $eq: ["$LocalStatus", "SyncFailed"] }, 1, 0] },
+          },
+          syncPending: {
+            $sum: { $cond: [{ $eq: ["$LocalStatus", "Created"] }, 1, 0] },
+          },
+          syncDisabled: {
+            $sum: { $cond: [{ $eq: ["$SAPSyncDisabled", true] }, 1, 0] },
+          },
+        },
+      },
+    ]);
+
+    const stats =
+      sapSyncStats.length > 0
+        ? sapSyncStats[0]
+        : {
+            totalCustomers: 0,
+            syncedWithSAP: 0,
+            syncFailed: 0,
+            syncPending: 0,
+            syncDisabled: 0,
+          };
+
+    res.status(200).json({
+      success: true,
+      data: {
+        customers: formattedCustomers,
+        pagination: {
+          currentPage: pageNum,
+          totalPages,
+          totalCustomers,
+          hasNextPage: pageNum < totalPages,
+          hasPrevPage: pageNum > 1,
+          limit: limitNum,
+        },
+        sapSyncStatistics: {
+          totalCustomers: stats.totalCustomers,
+          syncedWithSAP: stats.syncedWithSAP,
+          syncFailed: stats.syncFailed,
+          syncPending: stats.syncPending,
+          syncDisabled: stats.syncDisabled,
+          syncSuccessRate:
+            stats.totalCustomers > 0
+              ? ((stats.syncedWithSAP / stats.totalCustomers) * 100).toFixed(1)
+              : 0,
+        },
+      },
+    });
+  } catch (error) {
+    console.error("Error fetching customers:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch customers",
       error: error.message,
     });
   }
@@ -961,4 +1321,6 @@ module.exports = {
   getCustomersWithMetrics,
   assignSalesAgent,
   getAgentAssignedCustomers,
+  getAllCustomersWithSAPStatus,
+  pushCustomerToSAP,
 };

@@ -5,6 +5,9 @@ const {
   getDataTechSalesAgentById,
   getDataTechSalesAgentsForLeads,
   getDataTechSalesAgentPerformanceStats,
+  activateUser,
+  deactivateUser,
+  toggleUserActivation,
 } = require("../controllers/users.controller");
 
 const router = express.Router();
@@ -17,5 +20,7 @@ router.get(
   getDataTechSalesAgentPerformanceStats
 );
 router.get("/:id", getUserById);
-
+router.patch("/:id/activate", activateUser);
+router.patch("/:id/deactivate", deactivateUser);
+router.patch("/:id/toggle-activation", toggleUserActivation);
 module.exports = router;

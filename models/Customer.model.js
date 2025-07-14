@@ -9,7 +9,7 @@ const CustomerSchema = new Schema({
   },
   CardCode: {
     type: String,
-    index: true, // Still index for performance
+    index: true,
   },
   Email: {
     type: String,
@@ -31,17 +31,17 @@ const CustomerSchema = new Schema({
     type: [String],
     default: [],
   },
-
   // Assigned sales agent
   assignedTo: {
     type: Schema.Types.ObjectId,
     ref: "User",
+    required: false,
+    default: null,
   },
   contactOwnerName: {
     type: String,
     trim: true,
   },
-
   // Additional fields
   createdAt: {
     type: Date,
@@ -51,11 +51,9 @@ const CustomerSchema = new Schema({
     type: Date,
     default: Date.now,
   },
-
   notes: {
     type: String,
   },
-
   companyId: {
     type: String,
     trim: true,
@@ -79,12 +77,37 @@ const CustomerSchema = new Schema({
     country: {
       type: String,
       trim: true,
-      default: "France", // Default value since your examples seem to be in France
+      default: "France",
     },
   },
   outstandingBalance: {
     type: Number,
     default: 0,
+  },
+  // SAP Integration fields - ADDED THESE
+  SyncedWithSAP: {
+    type: Boolean,
+    default: false,
+  },
+  LocalStatus: {
+    type: String,
+    enum: ["Created", "Synced", "SyncFailed"],
+    default: "Created",
+  },
+  customerType: {
+    type: String,
+    enum: ["sap", "non-sap"],
+    default: "non-sap",
+  },
+  SyncErrors: {
+    type: String,
+  },
+  LastSyncAttempt: {
+    type: Date,
+  },
+  SAPSyncDisabled: {
+    type: Boolean,
+    default: false,
   },
 });
 

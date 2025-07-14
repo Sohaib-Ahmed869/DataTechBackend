@@ -11,6 +11,8 @@ const {
   assignSalesAgent,
   getCustomerStats,
   getAgentAssignedCustomers,
+  pushCustomerToSAP,
+  getAllCustomersWithSAPStatus,
 } = require("../controllers/customer.controller");
 
 const router = express.Router();
@@ -26,6 +28,7 @@ router.post("/", createCustomer);
 
 // Get all customers with pagination and filtering
 router.get("/", getAllCustomers);
+router.get("/with-sap-status", getAllCustomersWithSAPStatus);
 
 // Get customers with metrics (sales orders, quotations)
 router.get("/with-metrics", getCustomersWithMetrics);
@@ -44,5 +47,6 @@ router.put("/:id", updateCustomer);
 
 // Delete customer by ID
 router.delete("/:id", deleteCustomer);
+router.post("/:id/push-to-sap", pushCustomerToSAP);
 
 module.exports = router;

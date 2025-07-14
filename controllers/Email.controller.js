@@ -33,7 +33,7 @@ const emailAccounts = {
 
 // Create SMTP transporter
 const createSMTPTransporter = (account) => {
-  return nodemailer.createTransporter({
+  return nodemailer.createTransport({
     host: "mail.data-tech.ae",
     port: 465,
     secure: true,
@@ -48,19 +48,34 @@ const createSMTPTransporter = (account) => {
 };
 
 // Fetch emails from IMAP and sync with database
-const syncEmailsFromIMAP = async (account, folder = "INBOX", limit = 50) => {
+const syncEmailsFromIMAP = async (account, folder = "INBOX", limit = null) => {
   return new Promise((resolve, reject) => {
-    const imap = new Imap(emailAccounts[account]);
+    const imap = new Imap({
+      ...emailAccounts[account],
+      keepalive: {
+        interval: 10000,
+        idleInterval: 300000,
+        forceNoop: true,
+      },
+    });
+
     const emails = [];
 
     imap.once("ready", () => {
-      imap.openBox(folder, true, (err, box) => {
+      console.log(`IMAP connection ready for ${account}`);
+
+      imap.openBox("INBOX", false, (err, box) => {
         if (err) {
-          console.error("Error opening mailbox:", err);
+          console.error(`Error opening INBOX for ${account}:`, err);
           reject(err);
           return;
         }
 
+        console.log(
+          `Opened INBOX for ${account}, total messages: ${box.messages.total}`
+        );
+
+        // Search for ALL emails, including recent ones
         imap.search(["ALL"], (err, results) => {
           if (err) {
             console.error("Error searching emails:", err);
@@ -69,20 +84,24 @@ const syncEmailsFromIMAP = async (account, folder = "INBOX", limit = 50) => {
           }
 
           if (results.length === 0) {
-            console.log("No emails found");
+            console.log(`No emails found in INBOX for ${account}`);
             resolve([]);
             imap.end();
             return;
           }
 
-          const recentResults = results.slice(-limit);
-          console.log(`Fetching ${recentResults.length} emails`);
+          // Get the most recent emails first (last 100 or all if less)
+          const recentResults = results.slice(-100).reverse();
+          console.log(`Fetching ${recentResults.length} emails for ${account}`);
 
           const fetch = imap.fetch(recentResults, {
             bodies: "",
             struct: true,
             envelope: true,
           });
+
+          let processedCount = 0;
+          const totalToProcess = recentResults.length;
 
           fetch.on("message", (msg, seqno) => {
             const emailData = { seqno };
@@ -110,115 +129,129 @@ const syncEmailsFromIMAP = async (account, folder = "INBOX", limit = 50) => {
 
             msg.once("end", () => {
               emails.push(emailData);
+              processedCount++;
+
+              if (processedCount === totalToProcess) {
+                processEmails();
+              }
             });
-          });
-
-          fetch.once("end", async () => {
-            try {
-              console.log(`Processing ${emails.length} emails`);
-              const processedEmails = await Promise.all(
-                emails.map(async (email) => {
-                  try {
-                    const parsed = email.parsed;
-                    const attrs = email.attrs;
-
-                    if (!parsed || !attrs) {
-                      console.log("Skipping email due to missing data");
-                      return null;
-                    }
-
-                    const emailDoc = {
-                      uid: attrs.uid,
-                      account,
-                      from: parsed?.from?.text || "Unknown",
-                      to: parsed?.to?.text || emailAccounts[account].user,
-                      subject: parsed?.subject || "No Subject",
-                      body: parsed?.text || parsed?.html || "No content",
-                      html: parsed?.html || "",
-                      date: parsed?.date || attrs.date || new Date(),
-                      flags: attrs.flags || [],
-                      isRead: attrs.flags
-                        ? attrs.flags.includes("\\Seen")
-                        : false,
-                      isStarred: attrs.flags
-                        ? attrs.flags.includes("\\Flagged")
-                        : false,
-                      hasAttachment: parsed?.attachments
-                        ? parsed.attachments.length > 0
-                        : false,
-                      attachments:
-                        parsed?.attachments?.map((att) => ({
-                          filename: att.filename,
-                          contentType: att.contentType,
-                          size: att.size,
-                          content: att.content,
-                        })) || [],
-                      folder,
-                    };
-
-                    // Upsert email to database
-                    const savedEmail = await Email.findOneAndUpdate(
-                      { account, uid: attrs.uid },
-                      emailDoc,
-                      {
-                        upsert: true,
-                        new: true,
-                      }
-                    );
-
-                    return savedEmail;
-                  } catch (emailError) {
-                    console.error(
-                      "Error processing individual email:",
-                      emailError
-                    );
-                    return null;
-                  }
-                })
-              );
-
-              // Filter out null results
-              const validEmails = processedEmails.filter(
-                (email) => email !== null
-              );
-              console.log(
-                `Successfully processed ${validEmails.length} emails`
-              );
-
-              resolve(validEmails);
-              imap.end();
-            } catch (dbError) {
-              console.error("Database error:", dbError);
-              reject(dbError);
-              imap.end();
-            }
           });
 
           fetch.once("error", (err) => {
             console.error("Fetch error:", err);
             reject(err);
           });
+
+          async function processEmails() {
+            try {
+              console.log(`Processing ${emails.length} emails for ${account}`);
+
+              const processedEmails = [];
+
+              for (const email of emails) {
+                try {
+                  const parsed = email.parsed;
+                  const attrs = email.attrs;
+
+                  if (!parsed || !attrs) {
+                    console.log("Skipping email due to missing data");
+                    continue;
+                  }
+
+                  const emailDoc = {
+                    uid: attrs.uid,
+                    account,
+                    from: parsed?.from?.text || "Unknown",
+                    to: parsed?.to?.text || emailAccounts[account].user,
+                    subject: parsed?.subject || "No Subject",
+                    body: parsed?.text || parsed?.html || "No content",
+                    html: parsed?.html || "",
+                    date: parsed?.date || attrs.date || new Date(),
+                    flags: attrs.flags || [],
+                    isRead: attrs.flags
+                      ? attrs.flags.includes("\\Seen")
+                      : false,
+                    isStarred: attrs.flags
+                      ? attrs.flags.includes("\\Flagged")
+                      : false,
+                    hasAttachment: parsed?.attachments
+                      ? parsed.attachments.length > 0
+                      : false,
+                    attachments:
+                      parsed?.attachments?.map((att) => ({
+                        filename: att.filename,
+                        contentType: att.contentType,
+                        size: att.size,
+                        content: att.content,
+                      })) || [],
+                    folder: "INBOX",
+                  };
+
+                  // Check if email already exists
+                  const existingEmail = await Email.findOne({
+                    account,
+                    uid: attrs.uid,
+                  });
+
+                  let savedEmail;
+                  if (existingEmail) {
+                    // Update existing email
+                    savedEmail = await Email.findOneAndUpdate(
+                      { account, uid: attrs.uid },
+                      emailDoc,
+                      { new: true }
+                    );
+                  } else {
+                    // Create new email
+                    savedEmail = await Email.create(emailDoc);
+                  }
+
+                  processedEmails.push(savedEmail);
+                } catch (emailError) {
+                  console.error(
+                    "Error processing individual email:",
+                    emailError
+                  );
+                }
+              }
+
+              console.log(
+                `Successfully processed ${processedEmails.length} emails for ${account}`
+              );
+              resolve(processedEmails);
+              imap.end();
+            } catch (dbError) {
+              console.error("Database error:", dbError);
+              reject(dbError);
+              imap.end();
+            }
+          }
         });
       });
     });
 
     imap.once("error", (err) => {
-      console.error("IMAP connection error:", err);
+      console.error(`IMAP connection error for ${account}:`, err);
       reject(err);
     });
 
+    imap.once("end", () => {
+      console.log(`IMAP connection ended for ${account}`);
+    });
+
+    console.log(`Connecting to IMAP for ${account}...`);
     imap.connect();
   });
 };
 
 const emailController = {
-  // Get emails for specific account
+  // Get emails for specific account and folder
   getEmails: async (req, res) => {
     try {
       const { account } = req.params;
-      const { folder = "INBOX", limit = 50, sync = false } = req.query;
+      const { folder = "INBOX", sync = "true" } = req.query;
 
-      console.log(`Getting emails for account: ${account}, sync: ${sync}`);
+      console.log(`Getting emails for account: ${account}, folder: ${folder}`);
 
       if (!emailAccounts[account]) {
         return res.status(400).json({
@@ -227,11 +260,11 @@ const emailController = {
         });
       }
 
-      // Sync with IMAP if requested
-      if (sync === "true") {
-        console.log("Syncing emails from IMAP...");
+      // Always sync INBOX to get latest emails
+      if (folder === "INBOX") {
+        console.log(`Force syncing INBOX for ${account}`);
         try {
-          await syncEmailsFromIMAP(account, folder, Number.parseInt(limit));
+          await syncEmailsFromIMAP(account, folder);
         } catch (syncError) {
           console.error("Sync error:", syncError);
           // Continue to fetch from database even if sync fails
@@ -239,17 +272,28 @@ const emailController = {
       }
 
       // Get emails from database
-      const emails = await Email.find({ account, folder })
-        .sort({ date: -1 })
-        .limit(Number.parseInt(limit));
+      const query = { account };
 
-      console.log(`Found ${emails.length} emails in database`);
+      if (folder === "STARRED") {
+        query.isStarred = true;
+      } else if (folder !== "INBOX") {
+        query.folder = folder;
+      } else {
+        query.folder = "INBOX";
+      }
+
+      const emails = await Email.find(query).sort({ date: -1 });
+
+      console.log(
+        `Found ${emails.length} emails in database for ${account}/${folder}`
+      );
 
       res.json({
         success: true,
         data: emails,
         account: emailAccounts[account].user,
         total: emails.length,
+        folder: folder,
       });
     } catch (error) {
       console.error("Error fetching emails:", error);
@@ -261,7 +305,7 @@ const emailController = {
     }
   },
 
-  // Send email
+  // Send email and save to sent folder
   sendEmail: async (req, res) => {
     try {
       const { account } = req.params;
@@ -294,6 +338,26 @@ const emailController = {
       };
 
       const result = await transporter.sendMail(mailOptions);
+
+      // Save sent email to database
+      const sentEmail = new Email({
+        uid: Date.now(), // Use timestamp as UID for sent emails
+        account,
+        from: emailAccounts[account].user,
+        to,
+        subject,
+        body: body || "",
+        html: html || body || "",
+        date: new Date(),
+        flags: ["\\Seen"],
+        isRead: true,
+        isStarred: false,
+        hasAttachment: false,
+        attachments: [],
+        folder: "SENT",
+      });
+
+      await sentEmail.save();
 
       console.log("Email sent successfully:", result.messageId);
 
@@ -401,13 +465,49 @@ const emailController = {
     }
   },
 
+  // Move email to folder
+  moveToFolder: async (req, res) => {
+    try {
+      const { account, id } = req.params;
+      const { folder } = req.body;
+
+      const email = await Email.findOneAndUpdate(
+        { _id: id, account },
+        { folder },
+        { new: true }
+      );
+
+      if (!email) {
+        return res.status(404).json({
+          success: false,
+          message: "Email not found",
+        });
+      }
+
+      res.json({
+        success: true,
+        message: `Email moved to ${folder}`,
+        data: email,
+      });
+    } catch (error) {
+      console.error("Error moving email:", error);
+      res.status(500).json({
+        success: false,
+        message: "Failed to move email",
+        error: error.message,
+      });
+    }
+  },
+
   // Sync emails manually
   syncEmails: async (req, res) => {
     try {
       const { account } = req.params;
-      const { folder = "INBOX", limit = 50 } = req.query;
+      const { folder = "INBOX" } = req.query;
 
-      console.log(`Manual sync requested for account: ${account}`);
+      console.log(
+        `Manual sync requested for account: ${account}, folder: ${folder}`
+      );
 
       if (!emailAccounts[account]) {
         return res.status(400).json({
@@ -416,17 +516,21 @@ const emailController = {
         });
       }
 
-      const emails = await syncEmailsFromIMAP(
+      // Force sync from IMAP
+      const emails = await syncEmailsFromIMAP(account, folder);
+
+      // Get updated emails from database
+      const updatedEmails = await Email.find({
         account,
-        folder,
-        Number.parseInt(limit)
-      );
+        folder: folder === "STARRED" ? { $exists: true } : folder,
+      }).sort({ date: -1 });
 
       res.json({
         success: true,
         message: "Emails synced successfully",
-        data: emails,
+        data: updatedEmails,
         synced: emails.length,
+        total: updatedEmails.length,
       });
     } catch (error) {
       console.error("Error syncing emails:", error);
@@ -443,6 +547,39 @@ const emailController = {
     try {
       const { account, id } = req.params;
 
+      const email = await Email.findOneAndUpdate(
+        { _id: id, account },
+        { folder: "TRASH" },
+        { new: true }
+      );
+
+      if (!email) {
+        return res.status(404).json({
+          success: false,
+          message: "Email not found",
+        });
+      }
+
+      res.json({
+        success: true,
+        message: "Email moved to trash",
+        data: email,
+      });
+    } catch (error) {
+      console.error("Error deleting email:", error);
+      res.status(500).json({
+        success: false,
+        message: "Failed to delete email",
+        error: error.message,
+      });
+    }
+  },
+
+  // Permanently delete email
+  permanentDelete: async (req, res) => {
+    try {
+      const { account, id } = req.params;
+
       const email = await Email.findOneAndDelete({ _id: id, account });
 
       if (!email) {
@@ -454,13 +591,13 @@ const emailController = {
 
       res.json({
         success: true,
-        message: "Email deleted successfully",
+        message: "Email permanently deleted",
       });
     } catch (error) {
-      console.error("Error deleting email:", error);
+      console.error("Error permanently deleting email:", error);
       res.status(500).json({
         success: false,
-        message: "Failed to delete email",
+        message: "Failed to permanently delete email",
         error: error.message,
       });
     }
@@ -500,6 +637,52 @@ const emailController = {
       res.status(500).json({
         success: false,
         message: "Failed to search emails",
+        error: error.message,
+      });
+    }
+  },
+
+  // Get folder counts
+  getFolderCounts: async (req, res) => {
+    try {
+      const { account } = req.params;
+
+      if (!emailAccounts[account]) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid email account",
+        });
+      }
+
+      const counts = await Promise.all([
+        Email.countDocuments({ account, folder: "INBOX", isRead: false }),
+        Email.countDocuments({ account, folder: "SENT" }),
+        Email.countDocuments({ account, folder: "DRAFTS" }),
+        Email.countDocuments({ account, isStarred: true }),
+        Email.countDocuments({ account, folder: "SPAM" }),
+        Email.countDocuments({ account, folder: "ARCHIVE" }),
+        Email.countDocuments({ account, folder: "TRASH" }),
+      ]);
+
+      const folderCounts = {
+        inbox: counts[0],
+        sent: counts[1],
+        drafts: counts[2],
+        starred: counts[3],
+        spam: counts[4],
+        archive: counts[5],
+        trash: counts[6],
+      };
+
+      res.json({
+        success: true,
+        data: folderCounts,
+      });
+    } catch (error) {
+      console.error("Error getting folder counts:", error);
+      res.status(500).json({
+        success: false,
+        message: "Failed to get folder counts",
         error: error.message,
       });
     }

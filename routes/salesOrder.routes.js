@@ -9,12 +9,17 @@ const {
   cancelSalesOrder,
   duplicateSalesOrder,
   getSalesOrderStats,
+  getAllSalesOrdersWithSAPStatus,
+  pushOrderToSAP,
 } = require("../controllers/salesOrder.controller");
 
 const router = express.Router();
 
 // Get sales order statistics
+router.post("/", createSalesOrder);
+router.get("/", getAllSalesOrders);
 router.get("/stats", getSalesOrderStats);
+router.get("/with-sap-status", getAllSalesOrdersWithSAPStatus); // New route with SAP status
 
 // Get sales orders by customer CardCode
 router.get("/customer/:cardCode", getSalesOrdersByCustomer);
@@ -23,10 +28,8 @@ router.get("/customer/:cardCode", getSalesOrdersByCustomer);
 router.get("/docEntry/:docEntry", getSalesOrderByDocEntry);
 
 // Create a new sales order
-router.post("/", createSalesOrder);
 
 // Get all sales orders with pagination and filtering
-router.get("/", getAllSalesOrders);
 
 // Duplicate sales order
 router.post("/:docEntry/duplicate", duplicateSalesOrder);
@@ -39,5 +42,6 @@ router.get("/:id", getSalesOrderById);
 
 // Update sales order by ID
 router.put("/:id", updateSalesOrder);
+router.post("/sap/push/:docEntry", pushOrderToSAP); // Manual push to SAP
 
 module.exports = router;

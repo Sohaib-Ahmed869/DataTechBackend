@@ -1,18 +1,22 @@
 const Quotation = require("../models/Quotation.model");
 const Customer = require("../models/Customer.model");
 const Task = require("../models/Task.model");
+const Item = require("../models/items.model");
 const quotationService = require("../utils/quotationService");
 const emailService = require("../utils/emailService");
 const pdfGenerator = require("../utils/pdfGenerator");
 const SalesOrder = require("../models/SalesOrder.model");
-
-// Get all quotations with pagination and filtering
+const {
+  formatOrderForSAP,
+  createSalesOrderInSAP,
+  checkBusinessPartnerExists,
+  testSAPConnection: testSAPConnectionUtil,
+} = require("../utils/sapB1Integration");
 
 // Get quotations for a specific customer
 const getCustomerQuotations = async (req, res) => {
   try {
     const { cardCode } = req.params;
-
     const quotations = await Quotation.find({ CardCode: cardCode })
       .populate("salesAgent", "firstName lastName email")
       .sort({ DocDate: -1 })
@@ -36,7 +40,6 @@ const getCustomerQuotations = async (req, res) => {
 const getQuotationByDocEntry = async (req, res) => {
   try {
     const { docEntry } = req.params;
-
     const quotation = await Quotation.findOne({ DocEntry: docEntry })
       .populate("salesAgent", "firstName lastName email")
       .lean();
@@ -62,7 +65,7 @@ const getQuotationByDocEntry = async (req, res) => {
   }
 };
 
-// Convert quotation to order
+// Enhanced Convert quotation to order with complete item data
 const convertToOrder = async (req, res) => {
   try {
     const { docEntry } = req.params;
@@ -123,24 +126,101 @@ const convertToOrder = async (req, res) => {
     console.log(`Generated new order DocEntry: ${newDocEntry}`);
 
     // Create notes for the order
-    const orderNotes = `This order was created from quotation #${quotation.DocEntry} by ${userName}. Original quotation amount: €${quotation.DocTotal}.`;
+    const orderNotes = `This order was created from quotation #${quotation.DocEntry} by ${userName}. Original quotation amount: AED ${quotation.DocTotal}.`;
 
     // Prepare quotation data
     const quotationData = quotation.toObject();
 
-    // Process document lines to ensure proper formatting
-    const processedDocumentLines = quotationData.DocumentLines.map(
-      (line, index) => ({
-        ...line,
-        LineNum: index, // Ensure proper line numbering
-        PriceList: quotationData.PriceList || 2, // Default to Prix Livraison
-        LineTotal: (line.Quantity || 0) * (line.Price || 0),
-        // Remove any quotation-specific fields that shouldn't be in orders
-        _id: undefined,
+    // Enhanced document lines processing with complete item data
+    const processedDocumentLines = await Promise.all(
+      quotationData.DocumentLines.map(async (line, index) => {
+        let completeItemData = {};
+
+        // Check if we have stored item data in the line itself (from quotation creation)
+        if (line.ItemCode) {
+          try {
+            // Try to find item by ItemCode in the database
+            const itemFromDB = await Item.findOne({
+              ItemCode: line.ItemCode,
+            }).lean();
+
+            if (itemFromDB) {
+              completeItemData = {
+                // SAP B1 required fields
+                ItemCode: itemFromDB.ItemCode,
+                ItemName: itemFromDB.ItemName,
+                ItemDescription: itemFromDB.ForeignName || itemFromDB.ItemName,
+                // SAP item classification
+                ItemType: itemFromDB.ItemType || "itItems",
+                ItemsGroupCode: itemFromDB.ItmsGrpCod,
+                ItemsGroupName: itemFromDB.ItmsGrpNam,
+                // Inventory data
+                OnHand: itemFromDB.OnHand || 0,
+                IsCommited: itemFromDB.IsCommited || 0,
+                OnOrder: itemFromDB.OnOrder || 0,
+                // Pricing and costing
+                AvgPrice: itemFromDB.AvgPrice,
+                LastPurchasePrice: itemFromDB.LastPurchasePrice,
+                // VAT and tax information
+                VatGourpSa: itemFromDB.VatGourpSa || "A1",
+                // UoM information
+                SalUnitMsr: itemFromDB.SalUnitMsr || "EA",
+                PurUnitMsr: itemFromDB.PurUnitMsr || "EA",
+                // Additional SAP fields
+                ManBtchNum: itemFromDB.ManBtchNum || "tNO",
+                ManSerNum: itemFromDB.ManSerNum || "tNO",
+                // Custom fields
+                U_ItemCategory: itemFromDB.U_ItemCategory,
+                U_ItemSubCategory: itemFromDB.U_ItemSubCategory,
+                // Warehouse information
+                DfltWH: itemFromDB.DfltWH || "01",
+              };
+            }
+          } catch (itemError) {
+            console.warn(
+              `Could not fetch item data for ItemCode ${line.ItemCode}:`,
+              itemError.message
+            );
+          }
+        }
+
+        // Merge quotation line data with complete item data
+        return {
+          LineNum: index,
+          // Core line data from quotation
+          ItemCode: line.ItemCode,
+          ItemName: line.ItemName || completeItemData.ItemName,
+          ItemDescription:
+            line.ItemDescription || completeItemData.ItemDescription,
+          Quantity: line.Quantity || 1,
+          Price: line.Price || 0,
+          LineTotal: (line.Quantity || 1) * (line.Price || 0),
+          // Enhanced data from database item
+          ...completeItemData,
+          // Quotation-specific overrides (these take precedence)
+          Price: line.Price || completeItemData.AvgPrice || 0,
+          Currency: quotationData.DocCurrency || "AED",
+          // SAP B1 specific fields
+          VatGroup: completeItemData.VatGourpSa || "A1",
+          UoMCode: completeItemData.SalUnitMsr || "EA",
+          UoMEntry: 1,
+          // Warehouse and inventory
+          WarehouseCode: completeItemData.DfltWH || "01",
+          // Pricing list
+          PriceList: quotationData.PriceList || 1, // Use price list 1 for AED
+          // Line type
+          LineType: "Item",
+          // Reference to original quotation line
+          BaseType: 23,
+          BaseEntry: quotation.DocEntry,
+          BaseLine: index,
+          // Remove MongoDB-specific fields
+          _id: undefined,
+        };
       })
     );
 
-    // Create the sales order from quotation data
+    // Create the sales order data (but don't save to DB yet)
     const orderData = {
       // Basic document info
       DocEntry: newDocEntry,
@@ -150,70 +230,116 @@ const convertToOrder = async (req, res) => {
       DocDueDate: req.body.DocDueDate || quotation.DocDueDate || new Date(),
       CreationDate: new Date(),
       UpdateDate: new Date(),
-
       // Customer info
       CardCode: quotation.CardCode,
       CardName: quotation.CardName,
       Address: quotation.Address || "",
-
       // Financial info
       DocTotal: quotation.DocTotal,
-      DocCurrency: quotation.DocCurrency || "EUR",
-      PriceList: quotationData.PriceList || 2,
-
-      // Document lines
+      DocCurrency: quotation.DocCurrency || "AED",
+      PriceList: 1, // Use price list 1 for AED currency
+      // Enhanced document lines with complete item data
       DocumentLines: processedDocumentLines,
-
       // Comments and notes
       Comments: quotation.Comments || "",
       U_Notes: orderNotes,
-
       // Sales agent
       salesAgent: quotation.salesAgent._id,
-
       // Reference to original quotation
       OriginatingQuotation: quotation.DocEntry,
-
+      BaseType: 23,
+      BaseEntry: quotation.DocEntry,
       // SAP Integration fields
       SyncedWithSAP: false,
       LocalStatus: "Created",
-
+      SyncErrors: null,
+      LastSyncAttempt: null,
+      SAPSyncDisabled: false,
       // Payment fields (if applicable)
       payment_status: quotation.payment_status || "pending",
       Payment_id: quotation.Payment_id || "",
-
       // Override with any additional data from request body
       ...req.body,
-
       // Ensure critical fields are not overridden
       DocEntry: newDocEntry,
       DocNum: newDocNum,
       OriginatingQuotation: quotation.DocEntry,
     };
 
-    console.log("Creating new sales order with data:", {
+    console.log("Preparing order data for SAP push:", {
       DocEntry: orderData.DocEntry,
       DocNum: orderData.DocNum,
       CardName: orderData.CardName,
       DocTotal: orderData.DocTotal,
       DocumentLinesCount: orderData.DocumentLines.length,
+      PriceList: orderData.PriceList,
     });
 
-    // Create the new order
-    const newOrder = new SalesOrder(orderData);
-    await newOrder.save();
+    // Create temporary order object for SAP push (without saving to DB)
+    const tempOrder = new SalesOrder(orderData);
 
+    // CRITICAL: Push to SAP FIRST before saving to MongoDB
+    console.log("🔄 Pushing order to SAP before MongoDB conversion...");
+    const sapResult = await pushOrderToSAPInternal(tempOrder);
+
+    // Only proceed with MongoDB conversion if SAP push succeeds
+    if (!sapResult.success) {
+      console.error("❌ SAP push failed, aborting quotation conversion");
+
+      // Customize error message based on error code
+      let sapErrorMessage = "Failed to sync with SAP";
+      switch (sapResult.code) {
+        case "BP_NOT_FOUND":
+        case "INVALID_BP_CODE":
+          sapErrorMessage = `Business partner ${quotation.CardCode} does not exist in SAP B1`;
+          break;
+        case "EXCHANGE_RATE_ERROR":
+          sapErrorMessage =
+            "Exchange rate issue in SAP B1 - please check currency configuration";
+          break;
+        case "CURRENCY_ERROR":
+          sapErrorMessage = "Currency configuration issue in SAP B1";
+          break;
+        case "CONNECTION_ERROR":
+          sapErrorMessage =
+            "Could not connect to SAP B1 - please check connection";
+          break;
+      }
+
+      return res.status(400).json({
+        success: false,
+        message:
+          "❌ Cannot convert quotation to order: SAP synchronization failed",
+        error: sapErrorMessage,
+        details: sapResult.error,
+        code: sapResult.code,
+        quotation: {
+          DocEntry: quotation.DocEntry,
+          status: "Active", // Quotation remains active
+        },
+      });
+    }
+
+    // SAP push succeeded, now save to MongoDB
+    console.log("✅ SAP push successful, proceeding with MongoDB conversion");
+
+    // Update the order with SAP sync success data
+    tempOrder.SyncedWithSAP = true;
+    tempOrder.LocalStatus = "Synced";
+    tempOrder.SAPDocEntry = sapResult.SAPDocEntry;
+
+    // Save the order to MongoDB
+    await tempOrder.save();
     console.log(
-      `Sales order created successfully with DocEntry: ${newOrder.DocEntry}`
+      `Sales order created successfully with DocEntry: ${tempOrder.DocEntry}`
     );
 
-    // Update the quotation to mark it as converted
+    // Update the quotation to mark it as converted (only after successful SAP push)
     quotation.IsActive = false;
-    quotation.ConvertedToOrderDocEntry = newOrder.DocEntry;
+    quotation.ConvertedToOrderDocEntry = tempOrder.DocEntry;
     quotation.ConvertedDate = new Date();
     quotation.UpdateDate = new Date();
     await quotation.save();
-
     console.log(`Quotation ${docEntry} marked as converted`);
 
     // Update the associated task if it exists
@@ -222,7 +348,7 @@ const convertToOrder = async (req, res) => {
         status: "completed",
         completedDate: new Date(),
         metadata: {
-          convertedToOrder: newOrder.DocEntry,
+          convertedToOrder: tempOrder.DocEntry,
           convertedBy: userId,
           convertedDate: new Date().toISOString(),
         },
@@ -231,20 +357,31 @@ const convertToOrder = async (req, res) => {
     }
 
     // Populate the order for response
-    const populatedOrder = await SalesOrder.findById(newOrder._id)
+    const populatedOrder = await SalesOrder.findById(tempOrder._id)
       .populate("salesAgent", "firstName lastName email")
       .lean();
 
+    // Return success response
     res.status(201).json({
       success: true,
-      message: "Quotation successfully converted to order",
+      message:
+        "✅ Quotation successfully converted to order and synced with SAP",
       data: {
-        order: populatedOrder,
+        order: {
+          ...populatedOrder,
+          SAPDocEntry: sapResult.SAPDocEntry,
+          SyncedWithSAP: true,
+          LocalStatus: "Synced",
+        },
         originalQuotation: {
           DocEntry: quotation.DocEntry,
           status: "Converted",
           convertedDate: quotation.ConvertedDate,
         },
+      },
+      sapSync: {
+        success: true,
+        SAPDocEntry: sapResult.SAPDocEntry,
       },
     });
   } catch (error) {
@@ -252,6 +389,250 @@ const convertToOrder = async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Error converting quotation to order",
+      error: error.message,
+    });
+  }
+};
+
+// Internal function to push order to SAP (reused from sales order controller)
+async function pushOrderToSAPInternal(order) {
+  try {
+    console.log("🚀 Starting SAP integration for order:", order.DocEntry);
+
+    // Skip connection test for now - go directly to business partner check
+    console.log(
+      "⏭️ Skipping connection test, proceeding with business partner check..."
+    );
+
+    // Check if business partner exists in SAP
+    try {
+      const businessPartnerExists = await checkBusinessPartnerExists(
+        order.CardCode
+      );
+      if (!businessPartnerExists) {
+        const errorMsg = `Business partner ${order.CardCode} does not exist in SAP B1`;
+        order.SyncErrors = errorMsg;
+        order.LastSyncAttempt = new Date();
+        order.LocalStatus = "SyncFailed";
+        order.SAPSyncDisabled = true;
+        await order.save();
+
+        return {
+          success: false,
+          error: errorMsg,
+          code: "BP_NOT_FOUND",
+        };
+      }
+    } catch (bpError) {
+      console.warn(
+        `Could not verify business partner in SAP: ${bpError.message}`
+      );
+      // Continue anyway - let the order creation attempt reveal the issue
+    }
+
+    // Format the order for SAP B1
+    const sapOrder = await formatOrderForSAP(order);
+
+    // Push to SAP B1
+    const sapResponse = await createSalesOrderInSAP(sapOrder);
+
+    // Update local order with SAP DocEntry if successful
+    if (sapResponse && (sapResponse.DocEntry || sapResponse.simulated)) {
+      order.SAPDocEntry = sapResponse.DocEntry;
+      order.DocumentStatus = "Open";
+      order.UpdateDate = new Date();
+      order.SyncedWithSAP = true;
+      order.LocalStatus = "Synced";
+      order.SyncErrors = undefined;
+      order.SAPSyncDisabled = false;
+      await order.save();
+
+      console.log(
+        "✅ Order successfully synced with SAP:",
+        sapResponse.DocEntry || "simulated"
+      );
+
+      return {
+        success: true,
+        SAPDocEntry: sapResponse.DocEntry,
+        sapData: sapResponse,
+      };
+    } else {
+      throw new Error("Invalid response from SAP B1");
+    }
+  } catch (error) {
+    console.error("❌ Error pushing order to SAP:", error.message);
+
+    // Categorize error types
+    let errorCode = "GENERAL_ERROR";
+    if (
+      error.message.includes("Business partner") &&
+      error.message.includes("does not exist")
+    ) {
+      errorCode = "BP_NOT_FOUND";
+    } else if (error.message.includes("Invalid BP code")) {
+      errorCode = "INVALID_BP_CODE";
+    } else if (error.message.includes("exchange rate")) {
+      errorCode = "EXCHANGE_RATE_ERROR";
+    } else if (error.message.includes("currency")) {
+      errorCode = "CURRENCY_ERROR";
+    } else if (error.message.includes("connection")) {
+      errorCode = "CONNECTION_ERROR";
+    }
+
+    // Update local order to mark sync failure
+    order.SyncErrors = error.message;
+    order.LastSyncAttempt = new Date();
+    order.LocalStatus = "SyncFailed";
+
+    // Disable automatic sync for certain error types
+    if (["BP_NOT_FOUND", "INVALID_BP_CODE"].includes(errorCode)) {
+      order.SAPSyncDisabled = true;
+    }
+
+    await order.save();
+
+    return {
+      success: false,
+      error: error.message || "Unknown error",
+      code: errorCode,
+    };
+  }
+}
+
+// Enhanced Create new quotation - stores item data in quotation lines without changing model
+const createQuotation = async (req, res) => {
+  const userId = req.user?._id;
+  try {
+    const {
+      CardCode,
+      CardName,
+      DocDate,
+      DocDueDate,
+      Comments,
+      DocumentLines,
+      DocTotal,
+      salesAgent,
+    } = req.body;
+
+    // Validate required fields
+    if (
+      !CardCode ||
+      !CardName ||
+      !DocumentLines ||
+      DocumentLines.length === 0
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "CardCode, CardName, and DocumentLines are required",
+      });
+    }
+
+    // Enhanced document lines processing to include complete item data
+    const enhancedDocumentLines = await Promise.all(
+      DocumentLines.map(async (line, index) => {
+        let enhancedLine = {
+          LineNum: index,
+          // Core quotation line data
+          ItemCode: line.ItemCode,
+          ItemName: line.ItemName,
+          ItemDescription: line.ItemDescription,
+          Quantity: line.Quantity || 1,
+          Price: line.Price || 0,
+          LineTotal: (line.Quantity || 1) * (line.Price || 0),
+          LineType: line.LineType || "Item",
+          // Copy any existing line data
+          ...line,
+        };
+
+        // If ItemCode is provided, fetch complete item data from database and store it in the line
+        if (line.ItemCode) {
+          try {
+            const itemFromDB = await Item.findOne({
+              ItemCode: line.ItemCode,
+            }).lean();
+            if (itemFromDB) {
+              // Store complete item data directly in the document line for future use
+              enhancedLine = {
+                ...enhancedLine,
+                // Store database item reference (not changing model, just storing data)
+                ItemName: itemFromDB.ItemName,
+                ItemDescription: itemFromDB.ForeignName || itemFromDB.ItemName,
+                // Store SAP-specific fields that will be needed during conversion
+                ItemType: itemFromDB.ItemType,
+                ItmsGrpCod: itemFromDB.ItmsGrpCod,
+                ItmsGrpNam: itemFromDB.ItmsGrpNam,
+                VatGourpSa: itemFromDB.VatGourpSa,
+                SalUnitMsr: itemFromDB.SalUnitMsr,
+                PurUnitMsr: itemFromDB.PurUnitMsr,
+                DfltWH: itemFromDB.DfltWH,
+                ManBtchNum: itemFromDB.ManBtchNum,
+                ManSerNum: itemFromDB.ManSerNum,
+                // Inventory information
+                OnHand: itemFromDB.OnHand,
+                IsCommited: itemFromDB.IsCommited,
+                OnOrder: itemFromDB.OnOrder,
+                // Pricing information
+                AvgPrice: itemFromDB.AvgPrice,
+                LastPurchasePrice: itemFromDB.LastPurchasePrice,
+                // Custom fields
+                U_ItemCategory: itemFromDB.U_ItemCategory,
+                U_ItemSubCategory: itemFromDB.U_ItemSubCategory,
+                // Store item database ID as a string for reference
+                itemDbId: itemFromDB._id.toString(),
+              };
+            }
+          } catch (itemError) {
+            console.warn(
+              `Could not fetch item data for ItemCode ${line.ItemCode}:`,
+              itemError.message
+            );
+          }
+        }
+
+        return enhancedLine;
+      })
+    );
+
+    // Prepare enhanced quotation data
+    const quotationData = {
+      CardCode,
+      CardName,
+      DocDate,
+      DocDueDate,
+      Comments,
+      DocumentLines: enhancedDocumentLines, // Use enhanced document lines
+      DocTotal: DocTotal || 0,
+      DocCurrency: "AED", // Set default currency to AED
+      salesAgent: salesAgent || userId,
+      assignedTo: userId,
+    };
+
+    console.log("Creating quotation with enhanced item data:", {
+      CardCode,
+      CardName,
+      DocumentLinesCount: enhancedDocumentLines.length,
+      SampleLineData: enhancedDocumentLines[0],
+    });
+
+    // Create quotation with task using our unified service
+    const result = await quotationService.createQuotationWithTask(
+      quotationData,
+      userId
+    );
+
+    res.status(201).json({
+      success: true,
+      message:
+        "Quotation and approval task created successfully with enhanced item data",
+      data: result.data,
+      task: result.task,
+    });
+  } catch (error) {
+    console.error("Error creating quotation:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to create quotation",
       error: error.message,
     });
   }
@@ -300,8 +681,7 @@ const cancelQuotation = async (req, res) => {
 
 // Duplicate quotation
 const duplicateQuotation = async (req, res) => {
-  const userId = req.user?._id; // Add this line - it was missing
-
+  const userId = req.user?._id;
   try {
     const { docEntry } = req.params;
 
@@ -362,6 +742,7 @@ const duplicateQuotation = async (req, res) => {
     });
   }
 };
+
 // Get quotation statistics
 const getQuotationStats = async (req, res) => {
   try {
@@ -388,11 +769,11 @@ const getQuotationStats = async (req, res) => {
 
     // Get statistics
     const totalQuotations = await Quotation.countDocuments(filter);
-
     const totalValueResult = await Quotation.aggregate([
       { $match: filter },
       { $group: { _id: null, total: { $sum: "$DocTotal" } } },
     ]);
+
     const totalValue =
       totalValueResult.length > 0 ? totalValueResult[0].total : 0;
 
@@ -437,7 +818,7 @@ const getQuotationStats = async (req, res) => {
   }
 };
 
-// Send quotation by email - simplified to just send quotation ID
+// Send quotation by email
 const sendQuotationByEmail = async (req, res) => {
   try {
     console.log("Received request to send quotation by email", req.body);
@@ -467,7 +848,7 @@ const sendQuotationByEmail = async (req, res) => {
       });
     }
 
-    // Prepare customer data (since you don't have a separate customer model)
+    // Prepare customer data
     const customerForTemplate = {
       CardName: quotation.CardName || "Valued Customer",
       street: "",
@@ -487,7 +868,6 @@ const sendQuotationByEmail = async (req, res) => {
         quotation,
         customerForTemplate
       );
-      // Log PDF details
       console.log(`PDF generated successfully: ${pdfBuffer.length} bytes`);
     } catch (pdfError) {
       console.error("Error generating PDF:", pdfError);
@@ -500,7 +880,6 @@ const sendQuotationByEmail = async (req, res) => {
     // Send email with attachment
     console.log("Sending email with PDF attachment...");
     try {
-      // Format the email for better deliverability
       const emailText =
         emailData.message ||
         `Dear ${quotation.CardName},\n\nPlease find attached your quotation #${quotation.DocNum}.\n\nThank you for your interest in our services.\n\nBest regards,\nDataTech Solutions Team`;
@@ -526,7 +905,7 @@ const sendQuotationByEmail = async (req, res) => {
               <p><strong>Valid Until:</strong> ${new Date(
                 quotation.DocDueDate
               ).toLocaleDateString()}</p>
-              <p><strong>Total Amount:</strong> €${quotation.DocTotal}</p>
+              <p><strong>Total Amount:</strong> AED ${quotation.DocTotal}</p>
             </div>
             <p>${
               emailData.message ||
@@ -570,7 +949,6 @@ const sendQuotationByEmail = async (req, res) => {
         sentDate: new Date(),
         messageId: info.messageId,
       });
-
       await quotation.save();
 
       return res.status(200).json({
@@ -600,11 +978,10 @@ const sendQuotationByEmail = async (req, res) => {
   }
 };
 
-// Generate payment link - simplified to just use quotation ID
+// Generate payment link
 const generatePaymentLink = async (req, res) => {
   try {
     const { docNum } = req.params;
-
     const quotation = await Quotation.findOne({ DocNum: docNum });
 
     if (!quotation) {
@@ -625,7 +1002,6 @@ const generatePaymentLink = async (req, res) => {
     const paymentId = `PAY_${docNum}_${Date.now()}`;
 
     // Here you would integrate with your payment provider
-    // For now, we'll simulate the payment link generation
     const paymentLink = `https://your-payment-provider.com/pay/${paymentId}`;
 
     // Update quotation with payment info
@@ -665,7 +1041,6 @@ const generatePaymentLink = async (req, res) => {
 const getPaymentStatus = async (req, res) => {
   try {
     const { docNum } = req.params;
-
     const quotation = await Quotation.findOne({ DocNum: docNum });
 
     if (!quotation) {
@@ -682,8 +1057,6 @@ const getPaymentStatus = async (req, res) => {
       });
     }
 
-    // Here you would check with your payment provider
-    // For now, we'll simulate the status check
     const paymentStatus = quotation.paymentStatus || "pending";
 
     res.status(200).json({
@@ -731,7 +1104,6 @@ const exportQuotations = async (req, res) => {
 
     // Apply other filters
     if (cardCode) filter.CardCode = { $regex: cardCode, $options: "i" };
-
     if (status) {
       if (status === "pending") {
         filter.approvalStatus = "pending";
@@ -761,7 +1133,6 @@ const exportQuotations = async (req, res) => {
     if (search) {
       const searchRegex = { $regex: search, $options: "i" };
       const searchNumber = Number.parseInt(search) || 0;
-
       filter.$or = [
         { CardName: searchRegex },
         { CardCode: searchRegex },
@@ -890,68 +1261,6 @@ const bulkRejectQuotations = async (req, res) => {
     });
   }
 };
-// Create new quotation with automatic approval task creation
-const createQuotation = async (req, res) => {
-  const userId = req.user?._id;
-  try {
-    const {
-      CardCode,
-      CardName,
-      DocDate,
-      DocDueDate,
-      Comments,
-      DocumentLines,
-      DocTotal,
-      salesAgent,
-    } = req.body;
-
-    // Validate required fields
-    if (
-      !CardCode ||
-      !CardName ||
-      !DocumentLines ||
-      DocumentLines.length === 0
-    ) {
-      return res.status(400).json({
-        success: false,
-        message: "CardCode, CardName, and DocumentLines are required",
-      });
-    }
-
-    // Prepare quotation data
-    const quotationData = {
-      CardCode,
-      CardName,
-      DocDate,
-      DocDueDate,
-      Comments,
-      DocumentLines,
-      DocTotal: DocTotal || 0,
-      salesAgent: salesAgent || userId,
-      assignedTo: userId,
-    };
-
-    // Create quotation with task using our unified service
-    const result = await quotationService.createQuotationWithTask(
-      quotationData,
-      userId
-    );
-
-    res.status(201).json({
-      success: true,
-      message: "Quotation and approval task created successfully",
-      data: result.data,
-      task: result.task,
-    });
-  } catch (error) {
-    console.error("Error creating quotation:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to create quotation",
-      error: error.message,
-    });
-  }
-};
 
 // Get all quotations with filtering
 const getAllQuotations = async (req, res) => {
@@ -965,7 +1274,7 @@ const getAllQuotations = async (req, res) => {
 
     // Role-based filtering
     if (userRole === "data_tech_sales_agent") {
-      filter.salesAgent = userId; // Sales agents can only see their own quotations
+      filter.salesAgent = userId;
     }
 
     // Status filtering
@@ -979,6 +1288,7 @@ const getAllQuotations = async (req, res) => {
     }
 
     const skip = (page - 1) * limit;
+
     const quotations = await Quotation.find(filter)
       .populate("salesAgent", "firstName lastName email")
       .populate("approvalTask")
@@ -1177,7 +1487,7 @@ const approveQuotation = async (req, res) => {
     // Update associated task if exists
     if (quotation.approvalTask) {
       await Task.findByIdAndUpdate(quotation.approvalTask, {
-        status: "approved", // This will automatically become "completed" due to our middleware
+        status: "approved",
         approvedBy: userId,
         approvedDate: new Date(),
         approvalComments: comments,
@@ -1256,6 +1566,7 @@ const rejectQuotation = async (req, res) => {
     });
   }
 };
+
 module.exports = {
   getAllQuotations,
   getCustomerQuotations,

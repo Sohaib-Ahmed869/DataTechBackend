@@ -27,6 +27,8 @@ const QuotationRoutes = require("./routes/quotation.routes");
 const TaskRoutes = require("./routes/task.routes");
 const SalesOrderRoutes = require("./routes/salesOrder.routes");
 const EmailRoutes = require("./routes/email.routes");
+const ItemsRoutes = require("./routes/items.routes");
+const BlogRoutes = require("./routes/blog.routes");
 const app = express();
 const port = process.env.PORT || 5001;
 
@@ -71,6 +73,8 @@ app.use("/datatech/api/quotations", QuotationRoutes);
 app.use("/datatech/api/tasks", TaskRoutes);
 app.use("/datatech/api/sales-orders", SalesOrderRoutes);
 app.use("/datatech/api/emails", EmailRoutes);
+app.use("/datatech/api/items", ItemsRoutes);
+app.use("/datatech/api/blogs", BlogRoutes);
 
 // Error handling middleware
 app.use(errorHandler);
