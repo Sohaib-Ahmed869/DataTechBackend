@@ -44,7 +44,12 @@ initializeDatabase();
 
 // CORS Configuration
 const corsOptions = {
-  origin: ["http://localhost:5173", "http://localhost:5174"],
+  origin: [
+    "http://localhost:5173",
+    "http://localhost:5174",
+    "http://halalfoodsales.s3-website.eu-north-1.amazonaws.com",
+    "https://data-tech.ae",
+  ],
   credentials: true,
   optionsSuccessStatus: 200,
   methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
