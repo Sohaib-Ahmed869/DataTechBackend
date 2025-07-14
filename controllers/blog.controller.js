@@ -1,32 +1,26 @@
-const Blog = require('../Models/Blog');
-const BlogView = require('../Models/BlogView');
+const Blog = require("../models/Blog");
+const BlogView = require("../models/BlogView");
 
 // Get all blogs
 exports.getAllBlogs = async (req, res) => {
   try {
-    const { 
-      page = 1, 
-      limit = 10, 
-      status,
-      search,
-      hashtag 
-    } = req.query;
+    const { page = 1, limit = 10, status, search, hashtag } = req.query;
 
     // Build query
     let query = {};
-    
+
     // Only filter by status if it's provided and not empty
-    if (status && status.trim() !== '') {
+    if (status && status.trim() !== "") {
       query.status = status;
     }
-    
+
     if (search) {
       query.$or = [
-        { content: { $regex: search, $options: 'i' } },
-        { authorName: { $regex: search, $options: 'i' } }
+        { content: { $regex: search, $options: "i" } },
+        { authorName: { $regex: search, $options: "i" } },
       ];
     }
-    
+
     if (hashtag) {
       query.hashtags = { $in: [hashtag] };
     }
@@ -35,7 +29,7 @@ exports.getAllBlogs = async (req, res) => {
       .sort({ createdAt: -1 })
       .limit(limit * 1)
       .skip((page - 1) * limit)
-      .populate('comments.user', 'name')
+      .populate("comments.user", "name")
       .exec();
 
     const totalBlogs = await Blog.countDocuments(query);
@@ -49,14 +43,14 @@ exports.getAllBlogs = async (req, res) => {
         totalPages,
         totalBlogs,
         hasNext: page < totalPages,
-        hasPrev: page > 1
-      }
+        hasPrev: page > 1,
+      },
     });
   } catch (error) {
     res.status(500).json({
       success: false,
-      message: 'Error fetching blogs',
-      error: error.message
+      message: "Error fetching blogs",
+      error: error.message,
     });
   }
 };
@@ -69,28 +63,28 @@ exports.getBlog = async (req, res) => {
 
     // Try to find by ID first, then by slug
     if (id.match(/^[0-9a-fA-F]{24}$/)) {
-      blog = await Blog.findById(id).populate('comments.user', 'name');
+      blog = await Blog.findById(id).populate("comments.user", "name");
     } else {
-      blog = await Blog.findOne({ slug: id }).populate('comments.user', 'name');
+      blog = await Blog.findOne({ slug: id }).populate("comments.user", "name");
     }
 
     if (!blog) {
       return res.status(404).json({
         success: false,
-        message: 'Blog not found'
+        message: "Blog not found",
       });
     }
 
     // Don't increment views here - use separate endpoint for that
     res.status(200).json({
       success: true,
-      data: blog
+      data: blog,
     });
   } catch (error) {
     res.status(500).json({
       success: false,
-      message: 'Error fetching blog',
-      error: error.message
+      message: "Error fetching blog",
+      error: error.message,
     });
   }
 };
@@ -99,9 +93,10 @@ exports.getBlog = async (req, res) => {
 exports.incrementViews = async (req, res) => {
   try {
     const { id } = req.params;
-    const clientIP = req.ip || req.connection.remoteAddress || req.headers['x-forwarded-for'];
-    const userAgent = req.headers['user-agent'];
-    
+    const clientIP =
+      req.ip || req.connection.remoteAddress || req.headers["x-forwarded-for"];
+    const userAgent = req.headers["user-agent"];
+
     // Find the blog
     let blog;
     if (id.match(/^[0-9a-fA-F]{24}$/)) {
@@ -113,7 +108,7 @@ exports.incrementViews = async (req, res) => {
     if (!blog) {
       return res.status(404).json({
         success: false,
-        message: 'Blog not found'
+        message: "Blog not found",
       });
     }
 
@@ -127,7 +122,7 @@ exports.incrementViews = async (req, res) => {
     const existingView = await BlogView.findOne({
       blogId: blog._id,
       clientIP: clientIP,
-      viewedAt: { $gte: oneDayAgo }
+      viewedAt: { $gte: oneDayAgo },
     });
 
     if (!existingView) {
@@ -140,29 +135,31 @@ exports.incrementViews = async (req, res) => {
         blogId: blog._id,
         clientIP: clientIP,
         userAgent: userAgent,
-        viewedAt: now
+        viewedAt: now,
       });
 
       console.log(`View incremented for blog ${blog._id} from IP ${clientIP}`);
     } else {
-      console.log(`View already recorded for blog ${blog._id} from IP ${clientIP} within 24 hours`);
+      console.log(
+        `View already recorded for blog ${blog._id} from IP ${clientIP} within 24 hours`
+      );
     }
 
     res.status(200).json({
       success: true,
-      message: 'View tracked successfully',
+      message: "View tracked successfully",
       data: {
         blogId: blog._id,
         views: blog.views,
-        newView: !existingView
-      }
+        newView: !existingView,
+      },
     });
   } catch (error) {
-    console.error('Error incrementing views:', error);
+    console.error("Error incrementing views:", error);
     res.status(500).json({
       success: false,
-      message: 'Error tracking view',
-      error: error.message
+      message: "Error tracking view",
+      error: error.message,
     });
   }
 };
@@ -173,17 +170,17 @@ exports.createBlog = async (req, res) => {
     const { content, hashtags, authorName, date, status } = req.body;
 
     // Validate required fields
-    if (!content || content.trim() === '' || content === '<p><br></p>') {
+    if (!content || content.trim() === "" || content === "<p><br></p>") {
       return res.status(400).json({
         success: false,
-        message: 'Content is required'
+        message: "Content is required",
       });
     }
 
-    if (!authorName || authorName.trim() === '') {
+    if (!authorName || authorName.trim() === "") {
       return res.status(400).json({
         success: false,
-        message: 'Author name is required'
+        message: "Author name is required",
       });
     }
 
@@ -192,8 +189,11 @@ exports.createBlog = async (req, res) => {
     if (hashtags) {
       if (Array.isArray(hashtags)) {
         processedHashtags = hashtags;
-      } else if (typeof hashtags === 'string') {
-        processedHashtags = hashtags.split(',').map(tag => tag.trim()).filter(tag => tag);
+      } else if (typeof hashtags === "string") {
+        processedHashtags = hashtags
+          .split(",")
+          .map((tag) => tag.trim())
+          .filter((tag) => tag);
       }
     }
 
@@ -202,29 +202,29 @@ exports.createBlog = async (req, res) => {
       hashtags: processedHashtags,
       authorName: authorName.trim(),
       date: date ? new Date(date) : new Date(),
-      status: status || 'published'
+      status: status || "published",
     });
 
     res.status(201).json({
       success: true,
-      message: 'Blog created successfully',
-      data: blog
+      message: "Blog created successfully",
+      data: blog,
     });
   } catch (error) {
     // Handle validation errors
-    if (error.name === 'ValidationError') {
-      const errors = Object.values(error.errors).map(err => err.message);
+    if (error.name === "ValidationError") {
+      const errors = Object.values(error.errors).map((err) => err.message);
       return res.status(400).json({
         success: false,
-        message: 'Validation error',
-        errors
+        message: "Validation error",
+        errors,
       });
     }
 
     res.status(500).json({
       success: false,
-      message: 'Error creating blog',
-      error: error.message
+      message: "Error creating blog",
+      error: error.message,
     });
   }
 };
@@ -240,28 +240,28 @@ exports.updateBlog = async (req, res) => {
     if (!existingBlog) {
       return res.status(404).json({
         success: false,
-        message: 'Blog not found'
+        message: "Blog not found",
       });
     }
 
     // Prepare update data
     const updateData = {};
-    
+
     if (content !== undefined) {
-      if (!content || content.trim() === '' || content === '<p><br></p>') {
+      if (!content || content.trim() === "" || content === "<p><br></p>") {
         return res.status(400).json({
           success: false,
-          message: 'Content cannot be empty'
+          message: "Content cannot be empty",
         });
       }
       updateData.content = content.trim();
     }
 
     if (authorName !== undefined) {
-      if (!authorName || authorName.trim() === '') {
+      if (!authorName || authorName.trim() === "") {
         return res.status(400).json({
           success: false,
-          message: 'Author name cannot be empty'
+          message: "Author name cannot be empty",
         });
       }
       updateData.authorName = authorName.trim();
@@ -279,37 +279,39 @@ exports.updateBlog = async (req, res) => {
       let processedHashtags = [];
       if (Array.isArray(hashtags)) {
         processedHashtags = hashtags;
-      } else if (typeof hashtags === 'string') {
-        processedHashtags = hashtags.split(',').map(tag => tag.trim()).filter(tag => tag);
+      } else if (typeof hashtags === "string") {
+        processedHashtags = hashtags
+          .split(",")
+          .map((tag) => tag.trim())
+          .filter((tag) => tag);
       }
       updateData.hashtags = processedHashtags;
     }
 
-    const blog = await Blog.findByIdAndUpdate(
-      id,
-      updateData,
-      { new: true, runValidators: true }
-    );
+    const blog = await Blog.findByIdAndUpdate(id, updateData, {
+      new: true,
+      runValidators: true,
+    });
 
     res.status(200).json({
       success: true,
-      message: 'Blog updated successfully',
-      data: blog
+      message: "Blog updated successfully",
+      data: blog,
     });
   } catch (error) {
-    if (error.name === 'ValidationError') {
-      const errors = Object.values(error.errors).map(err => err.message);
+    if (error.name === "ValidationError") {
+      const errors = Object.values(error.errors).map((err) => err.message);
       return res.status(400).json({
         success: false,
-        message: 'Validation error',
-        errors
+        message: "Validation error",
+        errors,
       });
     }
 
     res.status(500).json({
       success: false,
-      message: 'Error updating blog',
-      error: error.message
+      message: "Error updating blog",
+      error: error.message,
     });
   }
 };
@@ -318,24 +320,24 @@ exports.updateBlog = async (req, res) => {
 exports.deleteBlog = async (req, res) => {
   try {
     const blog = await Blog.findByIdAndDelete(req.params.id);
-    
+
     if (!blog) {
       return res.status(404).json({
         success: false,
-        message: 'Blog not found'
+        message: "Blog not found",
       });
     }
 
     res.status(200).json({
       success: true,
-      message: 'Blog deleted successfully',
-      data: blog
+      message: "Blog deleted successfully",
+      data: blog,
     });
   } catch (error) {
     res.status(500).json({
       success: false,
-      message: 'Error deleting blog',
-      error: error.message
+      message: "Error deleting blog",
+      error: error.message,
     });
   }
 };
@@ -344,21 +346,21 @@ exports.deleteBlog = async (req, res) => {
 exports.getAllHashtags = async (req, res) => {
   try {
     const hashtags = await Blog.aggregate([
-      { $unwind: '$hashtags' },
-      { $group: { _id: '$hashtags', count: { $sum: 1 } } },
+      { $unwind: "$hashtags" },
+      { $group: { _id: "$hashtags", count: { $sum: 1 } } },
       { $sort: { count: -1 } },
-      { $project: { _id: 0, hashtag: '$_id', count: 1 } }
+      { $project: { _id: 0, hashtag: "$_id", count: 1 } },
     ]);
 
     res.status(200).json({
       success: true,
-      data: hashtags
+      data: hashtags,
     });
   } catch (error) {
     res.status(500).json({
       success: false,
-      message: 'Error fetching hashtags',
-      error: error.message
+      message: "Error fetching hashtags",
+      error: error.message,
     });
   }
 };
@@ -367,26 +369,26 @@ exports.getAllHashtags = async (req, res) => {
 exports.getBlogStats = async (req, res) => {
   try {
     const totalBlogs = await Blog.countDocuments();
-    const publishedBlogs = await Blog.countDocuments({ status: 'published' });
-    const draftBlogs = await Blog.countDocuments({ status: 'draft' });
-    const archivedBlogs = await Blog.countDocuments({ status: 'archived' });
+    const publishedBlogs = await Blog.countDocuments({ status: "published" });
+    const draftBlogs = await Blog.countDocuments({ status: "draft" });
+    const archivedBlogs = await Blog.countDocuments({ status: "archived" });
     const totalViews = await Blog.aggregate([
-      { $group: { _id: null, totalViews: { $sum: '$views' } } }
+      { $group: { _id: null, totalViews: { $sum: "$views" } } },
     ]);
 
     const topHashtags = await Blog.aggregate([
-      { $unwind: '$hashtags' },
-      { $group: { _id: '$hashtags', count: { $sum: 1 } } },
+      { $unwind: "$hashtags" },
+      { $group: { _id: "$hashtags", count: { $sum: 1 } } },
       { $sort: { count: -1 } },
       { $limit: 10 },
-      { $project: { _id: 0, hashtag: '$_id', count: 1 } }
+      { $project: { _id: 0, hashtag: "$_id", count: 1 } },
     ]);
 
     // Get most viewed blogs
-    const mostViewedBlogs = await Blog.find({ status: 'published' })
+    const mostViewedBlogs = await Blog.find({ status: "published" })
       .sort({ views: -1 })
       .limit(5)
-      .select('title authorName views createdAt');
+      .select("title authorName views createdAt");
 
     res.status(200).json({
       success: true,
@@ -397,14 +399,14 @@ exports.getBlogStats = async (req, res) => {
         archivedBlogs,
         totalViews: totalViews[0]?.totalViews || 0,
         topHashtags,
-        mostViewedBlogs
-      }
+        mostViewedBlogs,
+      },
     });
   } catch (error) {
     res.status(500).json({
       success: false,
-      message: 'Error fetching blog stats',
-      error: error.message
+      message: "Error fetching blog stats",
+      error: error.message,
     });
   }
 };
@@ -419,7 +421,7 @@ exports.getBlogViewAnalytics = async (req, res) => {
     if (!blog) {
       return res.status(404).json({
         success: false,
-        message: 'Blog not found'
+        message: "Blog not found",
       });
     }
 
@@ -431,26 +433,26 @@ exports.getBlogViewAnalytics = async (req, res) => {
       {
         $match: {
           blogId: blog._id,
-          viewedAt: { $gte: startDate }
-        }
+          viewedAt: { $gte: startDate },
+        },
       },
       {
         $group: {
           _id: {
-            $dateToString: { format: "%Y-%m-%d", date: "$viewedAt" }
+            $dateToString: { format: "%Y-%m-%d", date: "$viewedAt" },
           },
-          views: { $sum: 1 }
-        }
+          views: { $sum: 1 },
+        },
       },
       {
-        $sort: { _id: 1 }
-      }
+        $sort: { _id: 1 },
+      },
     ]);
 
     // Get unique visitors
-    const uniqueVisitors = await BlogView.distinct('clientIP', {
+    const uniqueVisitors = await BlogView.distinct("clientIP", {
       blogId: blog._id,
-      viewedAt: { $gte: startDate }
+      viewedAt: { $gte: startDate },
     });
 
     res.status(200).json({
@@ -460,14 +462,14 @@ exports.getBlogViewAnalytics = async (req, res) => {
         totalViews: blog.views,
         viewData,
         uniqueVisitors: uniqueVisitors.length,
-        period: `${days} days`
-      }
+        period: `${days} days`,
+      },
     });
   } catch (error) {
     res.status(500).json({
       success: false,
-      message: 'Error fetching view analytics',
-      error: error.message
+      message: "Error fetching view analytics",
+      error: error.message,
     });
   }
 };
@@ -479,7 +481,9 @@ exports.toggleLike = async (req, res) => {
     const userId = req.user.id;
     const blog = await Blog.findById(id);
     if (!blog) {
-      return res.status(404).json({ success: false, message: 'Blog not found' });
+      return res
+        .status(404)
+        .json({ success: false, message: "Blog not found" });
     }
     const index = blog.likes.indexOf(userId);
     let liked;
@@ -491,9 +495,17 @@ exports.toggleLike = async (req, res) => {
       liked = false;
     }
     await blog.save();
-    res.status(200).json({ success: true, liked, likesCount: blog.likes.length });
+    res
+      .status(200)
+      .json({ success: true, liked, likesCount: blog.likes.length });
   } catch (error) {
-    res.status(500).json({ success: false, message: 'Error toggling like', error: error.message });
+    res
+      .status(500)
+      .json({
+        success: false,
+        message: "Error toggling like",
+        error: error.message,
+      });
   }
 };
 
@@ -504,16 +516,32 @@ exports.addComment = async (req, res) => {
     const userId = req.user.id;
     const { text } = req.body;
     if (!text || !text.trim()) {
-      return res.status(400).json({ success: false, message: 'Comment text is required' });
+      return res
+        .status(400)
+        .json({ success: false, message: "Comment text is required" });
     }
     const blog = await Blog.findById(id);
     if (!blog) {
-      return res.status(404).json({ success: false, message: 'Blog not found' });
+      return res
+        .status(404)
+        .json({ success: false, message: "Blog not found" });
     }
     blog.comments.push({ user: userId, text: text.trim() });
     await blog.save();
-    res.status(201).json({ success: true, message: 'Comment added', comments: blog.comments });
+    res
+      .status(201)
+      .json({
+        success: true,
+        message: "Comment added",
+        comments: blog.comments,
+      });
   } catch (error) {
-    res.status(500).json({ success: false, message: 'Error adding comment', error: error.message });
+    res
+      .status(500)
+      .json({
+        success: false,
+        message: "Error adding comment",
+        error: error.message,
+      });
   }
 };
