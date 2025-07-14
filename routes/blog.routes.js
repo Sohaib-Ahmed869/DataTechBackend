@@ -11,7 +11,7 @@ const {
   getBlogViewAnalytics,
   toggleLike,
   addComment,
-} = require("../Controllers/blogController");
+} = require("../controllers/blog.controller");
 const { upload } = require("../utils/UploadImage");
 
 // Public routes
