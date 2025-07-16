@@ -58,9 +58,23 @@ const corsOptions = {
 
 // Middleware
 app.use(cors(corsOptions));
-app.use(express.json());
-app.use(bodyParser.json());
+// app.use(express.json());
 
+// app.use(bodyParser.json());
+app.use(
+  express.json({
+    limit: "10mb",
+    parameterLimit: 100000,
+  })
+);
+
+app.use(
+  express.urlencoded({
+    limit: "10mb",
+    extended: true,
+    parameterLimit: 100000,
+  })
+);
 // Routes
 app.use("/api/AiServices", AiServicesFormRoutes);
 app.use("/api/ConsultantServices", ConsultantServicesFormRoutes);
