@@ -49,6 +49,7 @@ const corsOptions = {
     "http://localhost:5174",
     "http://halalfoodsales.s3-website.eu-north-1.amazonaws.com",
     "https://data-tech.ae",
+    "https://datatech.calcite.live",
   ],
   credentials: true,
   optionsSuccessStatus: 200,
