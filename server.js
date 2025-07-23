@@ -29,6 +29,8 @@ const SalesOrderRoutes = require("./routes/salesOrder.routes");
 const EmailRoutes = require("./routes/email.routes");
 const ItemsRoutes = require("./routes/items.routes");
 const BlogRoutes = require("./routes/blog.routes");
+const TranslationRoutes = require("./routes/Translation.routes");
+const LemlistRoutes = require("./routes/lemlist.routes");
 const app = express();
 const port = process.env.PORT || 5001;
 
@@ -84,6 +86,7 @@ app.use("/api/TaxServices", taxRoutes);
 app.use("/api/business", BusinessFormRoutes);
 app.use("/api/contact", ContactFormRoutes);
 app.use("/api/general", GeneralInformationFormRoutes);
+app.use("/api/translate", TranslationRoutes);
 app.use("/datatech/api/auth", AuthRoutes);
 app.use("/datatech/api/leads", LeadsRoutes);
 app.use("/datatech/api/users", UserRoutes);
@@ -96,6 +99,7 @@ app.use("/datatech/api/sales-orders", SalesOrderRoutes);
 app.use("/datatech/api/emails", EmailRoutes);
 app.use("/datatech/api/items", ItemsRoutes);
 app.use("/datatech/api/blogs", BlogRoutes);
+app.use("/datatech/api/LemlistRoutes", LemlistRoutes);
 
 // Error handling middleware
 app.use(errorHandler);
