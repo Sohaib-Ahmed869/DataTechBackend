@@ -52,7 +52,7 @@ const corsOptions = {
     "http://halalfoodsales.s3-website.eu-north-1.amazonaws.com",
     "https://data-tech.ae",
     "https://datatech.calcite.live",
-    "http://sales.foodservices.live",
+    "https://sales.foodservices.live",
   ],
   credentials: true,
   optionsSuccessStatus: 200,
