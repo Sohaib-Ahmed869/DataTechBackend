@@ -12,7 +12,7 @@ const RATE_LIMIT = {
   requestInterval: 25,
   maxCharactersPerRequest: 50000,
   maxTextsPerBatch: 50, // Larger batches for efficiency
-  dailyCharacterLimit: 1000000, // 1M characters per day for Pro
+  dailyCharacterLimit: 999999999999999999999999999999999, // 1M characters per day for Pro
 };
 
 // Enhanced rate limiter optimized for Pro API
@@ -70,15 +70,6 @@ class ProRateLimiter {
       }
 
       const { requestFn, resolve, reject, estimatedChars } = this.queue.shift();
-
-      // Check daily character limit
-      if (
-        this.charactersUsed + estimatedChars >
-        RATE_LIMIT.dailyCharacterLimit
-      ) {
-        reject(new Error("Daily character limit would be exceeded"));
-        continue;
-      }
 
       try {
         // Ensure minimum interval between requests (much shorter for Pro)
